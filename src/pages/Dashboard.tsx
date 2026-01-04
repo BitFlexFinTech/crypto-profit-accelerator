@@ -11,6 +11,7 @@ import { VolatilityScanner } from '@/components/dashboard/cards/VolatilityScanne
 import { TradeTiming } from '@/components/dashboard/cards/TradeTiming';
 import { LoopMonitor } from '@/components/dashboard/cards/LoopMonitor';
 import { GlobalSyncButton } from '@/components/dashboard/GlobalSyncButton';
+import { RealTimePnL } from '@/components/dashboard/cards/RealTimePnL';
 
 export default function DashboardPage() {
   return (
@@ -31,8 +32,9 @@ export default function DashboardPage() {
 
       <StatsCards />
       
-      {/* Real-time Cards Grid */}
+      {/* Real-time P&L + Cards Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <RealTimePnL />
         <MarketScanner />
         <TradeFlow />
         <ExecutionSpeed />
