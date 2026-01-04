@@ -932,7 +932,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       const currentPositions = positionsRef.current;
       const currentSignals = signalsRef.current;
       const currentExchanges = exchangesRef.current;
-      const maxPositions = currentSettings.max_open_positions || 10;
+      const maxPositions = currentSettings.max_open_positions || 50;
       const availableSlots = maxPositions - currentPositions.length;
 
       // Check if we're at max positions
