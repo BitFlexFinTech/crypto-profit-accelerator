@@ -12,13 +12,14 @@ interface RequestRecord {
   timestamp: number;
 }
 
+// OPTIMIZED: Maximum throughput while staying within exchange limits
 const EXCHANGE_LIMITS: Record<ExchangeName, RateLimitConfig> = {
-  binance: { requestsPerSecond: 10, requestsPerMinute: 1200, burstLimit: 5 },
-  okx: { requestsPerSecond: 6, requestsPerMinute: 600, burstLimit: 3 },
-  bybit: { requestsPerSecond: 5, requestsPerMinute: 500, burstLimit: 3 },
-  kucoin: { requestsPerSecond: 3, requestsPerMinute: 300, burstLimit: 2 },
-  nexo: { requestsPerSecond: 2, requestsPerMinute: 200, burstLimit: 2 },
-  hyperliquid: { requestsPerSecond: 10, requestsPerMinute: 1000, burstLimit: 5 },
+  binance: { requestsPerSecond: 20, requestsPerMinute: 2400, burstLimit: 10 },
+  okx: { requestsPerSecond: 10, requestsPerMinute: 600, burstLimit: 5 },
+  bybit: { requestsPerSecond: 10, requestsPerMinute: 600, burstLimit: 5 },
+  kucoin: { requestsPerSecond: 6, requestsPerMinute: 360, burstLimit: 3 },
+  nexo: { requestsPerSecond: 5, requestsPerMinute: 300, burstLimit: 3 },
+  hyperliquid: { requestsPerSecond: 20, requestsPerMinute: 1200, burstLimit: 10 },
 };
 
 class RateLimiter {
