@@ -100,7 +100,7 @@ export function PositionsPanel() {
     return `~${Math.ceil(remainingSec / 3600)}h`;
   };
 
-  // Calculate required exit price for profit target
+  // Calculate required exit price for profit target with fee breakdown
   const getTargetPriceInfo = (position: typeof positions[0]) => {
     const feeRate = position.trade_type === 'spot' ? 0.001 : 0.0005;
     const entryFee = position.order_size_usd * feeRate;
@@ -128,6 +128,9 @@ export function PositionsPanel() {
       targetPrice,
       priceMovement: priceMovementNeeded,
       priceChangePercent,
+      entryFee,
+      exitFee,
+      fundingFee,
       totalFees,
     };
   };
@@ -221,13 +224,13 @@ export function PositionsPanel() {
                             </span>
                             {position.leverage && position.leverage > 1 && <span>{position.leverage}x</span>}
                           </div>
-                          {/* Profit Target Calculator */}
+                          {/* Profit Target Calculator with Fee Breakdown */}
                           {(() => {
                             const targetInfo = getTargetPriceInfo(position);
                             return (
-                              <div className="flex items-center gap-3 text-xs mt-1">
+                              <div className="flex flex-wrap items-center gap-3 text-xs mt-1">
                                 <span className="text-muted-foreground">
-                                  Target Price: <span className="text-foreground font-medium">${targetInfo.targetPrice.toFixed(4)}</span>
+                                  Target: <span className="text-foreground font-medium">${targetInfo.targetPrice.toFixed(4)}</span>
                                 </span>
                                 <span className="text-muted-foreground">
                                   Need: <span className={`font-medium ${position.direction === 'long' ? 'text-primary' : 'text-destructive'}`}>
@@ -235,7 +238,9 @@ export function PositionsPanel() {
                                   </span>
                                 </span>
                                 <span className="text-muted-foreground">
-                                  Fees: <span className="text-foreground">${targetInfo.totalFees.toFixed(2)}</span>
+                                  Fees: <span className="text-foreground">
+                                    entry ${targetInfo.entryFee.toFixed(2)} | exit ${targetInfo.exitFee.toFixed(2)}{targetInfo.fundingFee > 0 && ` | funding ${targetInfo.fundingFee.toFixed(2)}`} (${targetInfo.totalFees.toFixed(2)})
+                                  </span>
                                 </span>
                               </div>
                             );
