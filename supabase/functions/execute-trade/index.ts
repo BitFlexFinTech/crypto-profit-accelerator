@@ -21,12 +21,12 @@ interface TradeRequest {
   aiReasoning?: string;
 }
 
-interface OrderParams {
-  symbol: string;
-  side: string;
-  type: string;
-  price: number;
-  quantity: number;
+interface OrderResult {
+  success: boolean;
+  orderId: string;
+  executedPrice?: number;
+  executedQty?: number;
+  error?: string;
 }
 
 interface ExchangeCredentials {
@@ -36,7 +36,48 @@ interface ExchangeCredentials {
   passphrase?: string;
 }
 
-// Calculate exact take-profit price including all fees
+// Format symbol for each exchange
+function formatSymbol(symbol: string, exchange: string, tradeType: "spot" | "futures"): string {
+  const base = symbol.replace("/", "");
+  
+  switch (exchange) {
+    case "binance":
+      return tradeType === "futures" ? base : base; // BTCUSDT
+    case "okx":
+      if (tradeType === "futures") {
+        return symbol.replace("/", "-") + "-SWAP"; // BTC-USDT-SWAP
+      }
+      return symbol.replace("/", "-"); // BTC-USDT
+    case "bybit":
+      return base; // BTCUSDT
+    default:
+      return base;
+  }
+}
+
+// Format quantity to proper precision
+function formatQuantity(quantity: number, symbol: string): string {
+  if (symbol.includes("BTC")) {
+    return quantity.toFixed(5);
+  } else if (symbol.includes("ETH")) {
+    return quantity.toFixed(4);
+  } else {
+    return quantity.toFixed(2);
+  }
+}
+
+// Format price to proper precision
+function formatPrice(price: number, symbol: string): string {
+  if (price > 1000) {
+    return price.toFixed(2);
+  } else if (price > 1) {
+    return price.toFixed(4);
+  } else {
+    return price.toFixed(6);
+  }
+}
+
+// Calculate take-profit price including all fees
 function calculateTakeProfitPrice(
   entryPrice: number,
   direction: "long" | "short",
@@ -62,65 +103,25 @@ function calculateTakeProfitPrice(
   }
 }
 
-// Format symbol for each exchange
-function formatSymbol(symbol: string, exchange: string): string {
-  // Input: BTC/USDT -> Output depends on exchange
-  const base = symbol.replace("/", "");
-  
-  switch (exchange) {
-    case "binance":
-      return base; // BTCUSDT
-    case "okx":
-      return symbol.replace("/", "-"); // BTC-USDT
-    case "bybit":
-      return base; // BTCUSDT
-    default:
-      return base;
-  }
-}
-
-// Format quantity to proper precision
-function formatQuantity(quantity: number, symbol: string): string {
-  // Most crypto pairs use 6-8 decimal precision
-  // BTC uses 5 decimals, smaller coins use more
-  if (symbol.includes("BTC")) {
-    return quantity.toFixed(5);
-  } else if (symbol.includes("ETH")) {
-    return quantity.toFixed(4);
-  } else {
-    return quantity.toFixed(2);
-  }
-}
-
-// Format price to proper precision
-function formatPrice(price: number, symbol: string): string {
-  if (price > 1000) {
-    return price.toFixed(2);
-  } else if (price > 1) {
-    return price.toFixed(4);
-  } else {
-    return price.toFixed(6);
-  }
-}
-
 // ============================================
-// BINANCE API INTEGRATION
+// BINANCE - PLACE MARKET ORDER (ENTRY)
 // ============================================
-async function placeBinanceOrder(
+async function placeBinanceMarketOrder(
   credentials: ExchangeCredentials,
-  order: OrderParams
-): Promise<{ success: boolean; orderId: string; error?: string }> {
+  symbol: string,
+  side: string,
+  quantity: number,
+  tradeType: "spot" | "futures"
+): Promise<OrderResult> {
   try {
     const timestamp = Date.now();
-    const formattedSymbol = formatSymbol(order.symbol, "binance");
+    const formattedSymbol = formatSymbol(symbol, "binance", tradeType);
     
     const params = new URLSearchParams({
       symbol: formattedSymbol,
-      side: order.side, // BUY or SELL
-      type: "LIMIT",
-      timeInForce: "GTC",
-      quantity: formatQuantity(order.quantity, order.symbol),
-      price: formatPrice(order.price, order.symbol),
+      side: side, // BUY or SELL
+      type: "MARKET",
+      quantity: formatQuantity(quantity, symbol),
       timestamp: timestamp.toString(),
     });
     
@@ -128,20 +129,21 @@ async function placeBinanceOrder(
       .update(params.toString())
       .digest("hex");
     
-    console.log(`[Binance] Placing order: ${order.side} ${order.quantity} ${formattedSymbol} @ ${order.price}`);
+    const baseUrl = tradeType === "futures" 
+      ? "https://fapi.binance.com/fapi/v1/order"
+      : "https://api.binance.com/api/v3/order";
     
-    const response = await fetch(
-      `https://api.binance.com/api/v3/order?${params}&signature=${signature}`,
-      {
-        method: "POST",
-        headers: { "X-MBX-APIKEY": credentials.apiKey },
-      }
-    );
+    console.log(`[Binance] Placing MARKET ${side} order: ${quantity} ${formattedSymbol}`);
+    
+    const response = await fetch(`${baseUrl}?${params}&signature=${signature}`, {
+      method: "POST",
+      headers: { "X-MBX-APIKEY": credentials.apiKey },
+    });
     
     const data = await response.json();
     
     if (!response.ok) {
-      console.error(`[Binance] Order failed:`, data);
+      console.error(`[Binance] MARKET order failed:`, data);
       return { 
         success: false, 
         orderId: "", 
@@ -149,10 +151,34 @@ async function placeBinanceOrder(
       };
     }
     
-    console.log(`[Binance] Order placed successfully: ${data.orderId}`);
-    return { success: true, orderId: data.orderId.toString() };
+    // Extract executed price from fills
+    let executedPrice = 0;
+    let executedQty = 0;
+    if (data.fills && data.fills.length > 0) {
+      let totalCost = 0;
+      let totalQty = 0;
+      for (const fill of data.fills) {
+        const fillQty = parseFloat(fill.qty);
+        const fillPrice = parseFloat(fill.price);
+        totalCost += fillQty * fillPrice;
+        totalQty += fillQty;
+      }
+      executedPrice = totalCost / totalQty;
+      executedQty = totalQty;
+    } else {
+      executedPrice = parseFloat(data.avgPrice) || parseFloat(data.price) || 0;
+      executedQty = parseFloat(data.executedQty) || quantity;
+    }
+    
+    console.log(`[Binance] MARKET order filled: ${data.orderId} @ avg price ${executedPrice}`);
+    return { 
+      success: true, 
+      orderId: data.orderId.toString(),
+      executedPrice,
+      executedQty
+    };
   } catch (error) {
-    console.error(`[Binance] Exception:`, error);
+    console.error(`[Binance] MARKET order exception:`, error);
     return { 
       success: false, 
       orderId: "", 
@@ -162,23 +188,88 @@ async function placeBinanceOrder(
 }
 
 // ============================================
-// OKX API INTEGRATION
+// BINANCE - PLACE LIMIT ORDER (TP)
 // ============================================
-async function placeOKXOrder(
+async function placeBinanceLimitOrder(
   credentials: ExchangeCredentials,
-  order: OrderParams
-): Promise<{ success: boolean; orderId: string; error?: string }> {
+  symbol: string,
+  side: string,
+  price: number,
+  quantity: number,
+  tradeType: "spot" | "futures"
+): Promise<OrderResult> {
+  try {
+    const timestamp = Date.now();
+    const formattedSymbol = formatSymbol(symbol, "binance", tradeType);
+    
+    const params = new URLSearchParams({
+      symbol: formattedSymbol,
+      side: side,
+      type: "LIMIT",
+      timeInForce: "GTC",
+      quantity: formatQuantity(quantity, symbol),
+      price: formatPrice(price, symbol),
+      timestamp: timestamp.toString(),
+    });
+    
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(params.toString())
+      .digest("hex");
+    
+    const baseUrl = tradeType === "futures" 
+      ? "https://fapi.binance.com/fapi/v1/order"
+      : "https://api.binance.com/api/v3/order";
+    
+    console.log(`[Binance] Placing LIMIT ${side} order: ${quantity} ${formattedSymbol} @ ${price}`);
+    
+    const response = await fetch(`${baseUrl}?${params}&signature=${signature}`, {
+      method: "POST",
+      headers: { "X-MBX-APIKEY": credentials.apiKey },
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error(`[Binance] LIMIT order failed:`, data);
+      return { 
+        success: false, 
+        orderId: "", 
+        error: data.msg || `Binance API error: ${response.status}` 
+      };
+    }
+    
+    console.log(`[Binance] LIMIT order placed: ${data.orderId}`);
+    return { success: true, orderId: data.orderId.toString() };
+  } catch (error) {
+    console.error(`[Binance] LIMIT order exception:`, error);
+    return { 
+      success: false, 
+      orderId: "", 
+      error: error instanceof Error ? error.message : "Unknown error" 
+    };
+  }
+}
+
+// ============================================
+// OKX - PLACE MARKET ORDER (ENTRY)
+// ============================================
+async function placeOKXMarketOrder(
+  credentials: ExchangeCredentials,
+  symbol: string,
+  side: string,
+  quantity: number,
+  tradeType: "spot" | "futures"
+): Promise<OrderResult> {
   try {
     const timestamp = new Date().toISOString();
-    const formattedSymbol = formatSymbol(order.symbol, "okx");
+    const formattedSymbol = formatSymbol(symbol, "okx", tradeType);
     
     const body = JSON.stringify({
       instId: formattedSymbol,
-      tdMode: "cash", // cash for spot
-      side: order.side.toLowerCase(), // buy or sell
-      ordType: "limit",
-      px: formatPrice(order.price, order.symbol),
-      sz: formatQuantity(order.quantity, order.symbol),
+      tdMode: tradeType === "futures" ? "cross" : "cash",
+      side: side.toLowerCase(),
+      ordType: "market",
+      sz: formatQuantity(quantity, symbol),
     });
     
     const preHash = timestamp + "POST" + "/api/v5/trade/order" + body;
@@ -186,7 +277,7 @@ async function placeOKXOrder(
       .update(preHash)
       .digest("base64");
     
-    console.log(`[OKX] Placing order: ${order.side} ${order.quantity} ${formattedSymbol} @ ${order.price}`);
+    console.log(`[OKX] Placing MARKET ${side} order: ${quantity} ${formattedSymbol}`);
     
     const response = await fetch("https://www.okx.com/api/v5/trade/order", {
       method: "POST",
@@ -203,7 +294,7 @@ async function placeOKXOrder(
     const data = await response.json();
     
     if (data.code !== "0") {
-      console.error(`[OKX] Order failed:`, data);
+      console.error(`[OKX] MARKET order failed:`, data);
       return { 
         success: false, 
         orderId: "", 
@@ -212,10 +303,12 @@ async function placeOKXOrder(
     }
     
     const orderId = data.data?.[0]?.ordId || "";
-    console.log(`[OKX] Order placed successfully: ${orderId}`);
-    return { success: true, orderId };
+    const avgPx = parseFloat(data.data?.[0]?.avgPx || "0");
+    
+    console.log(`[OKX] MARKET order filled: ${orderId} @ avg price ${avgPx}`);
+    return { success: true, orderId, executedPrice: avgPx };
   } catch (error) {
-    console.error(`[OKX] Exception:`, error);
+    console.error(`[OKX] MARKET order exception:`, error);
     return { 
       success: false, 
       orderId: "", 
@@ -225,25 +318,93 @@ async function placeOKXOrder(
 }
 
 // ============================================
-// BYBIT API INTEGRATION
+// OKX - PLACE LIMIT ORDER (TP)
 // ============================================
-async function placeBybitOrder(
+async function placeOKXLimitOrder(
   credentials: ExchangeCredentials,
-  order: OrderParams
-): Promise<{ success: boolean; orderId: string; error?: string }> {
+  symbol: string,
+  side: string,
+  price: number,
+  quantity: number,
+  tradeType: "spot" | "futures"
+): Promise<OrderResult> {
+  try {
+    const timestamp = new Date().toISOString();
+    const formattedSymbol = formatSymbol(symbol, "okx", tradeType);
+    
+    const body = JSON.stringify({
+      instId: formattedSymbol,
+      tdMode: tradeType === "futures" ? "cross" : "cash",
+      side: side.toLowerCase(),
+      ordType: "limit",
+      px: formatPrice(price, symbol),
+      sz: formatQuantity(quantity, symbol),
+    });
+    
+    const preHash = timestamp + "POST" + "/api/v5/trade/order" + body;
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(preHash)
+      .digest("base64");
+    
+    console.log(`[OKX] Placing LIMIT ${side} order: ${quantity} ${formattedSymbol} @ ${price}`);
+    
+    const response = await fetch("https://www.okx.com/api/v5/trade/order", {
+      method: "POST",
+      headers: {
+        "OK-ACCESS-KEY": credentials.apiKey,
+        "OK-ACCESS-SIGN": signature,
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": credentials.passphrase || "",
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+    
+    const data = await response.json();
+    
+    if (data.code !== "0") {
+      console.error(`[OKX] LIMIT order failed:`, data);
+      return { 
+        success: false, 
+        orderId: "", 
+        error: data.msg || `OKX API error: ${data.code}` 
+      };
+    }
+    
+    const orderId = data.data?.[0]?.ordId || "";
+    console.log(`[OKX] LIMIT order placed: ${orderId}`);
+    return { success: true, orderId };
+  } catch (error) {
+    console.error(`[OKX] LIMIT order exception:`, error);
+    return { 
+      success: false, 
+      orderId: "", 
+      error: error instanceof Error ? error.message : "Unknown error" 
+    };
+  }
+}
+
+// ============================================
+// BYBIT - PLACE MARKET ORDER (ENTRY)
+// ============================================
+async function placeBybitMarketOrder(
+  credentials: ExchangeCredentials,
+  symbol: string,
+  side: string,
+  quantity: number,
+  tradeType: "spot" | "futures"
+): Promise<OrderResult> {
   try {
     const timestamp = Date.now().toString();
     const recvWindow = "5000";
-    const formattedSymbol = formatSymbol(order.symbol, "bybit");
+    const formattedSymbol = formatSymbol(symbol, "bybit", tradeType);
     
     const body = JSON.stringify({
-      category: "spot",
+      category: tradeType === "futures" ? "linear" : "spot",
       symbol: formattedSymbol,
-      side: order.side === "BUY" ? "Buy" : "Sell",
-      orderType: "Limit",
-      qty: formatQuantity(order.quantity, order.symbol),
-      price: formatPrice(order.price, order.symbol),
-      timeInForce: "GTC",
+      side: side === "BUY" ? "Buy" : "Sell",
+      orderType: "Market",
+      qty: formatQuantity(quantity, symbol),
     });
     
     const preHash = timestamp + credentials.apiKey + recvWindow + body;
@@ -251,7 +412,7 @@ async function placeBybitOrder(
       .update(preHash)
       .digest("hex");
     
-    console.log(`[Bybit] Placing order: ${order.side} ${order.quantity} ${formattedSymbol} @ ${order.price}`);
+    console.log(`[Bybit] Placing MARKET ${side} order: ${quantity} ${formattedSymbol}`);
     
     const response = await fetch("https://api.bybit.com/v5/order/create", {
       method: "POST",
@@ -268,7 +429,7 @@ async function placeBybitOrder(
     const data = await response.json();
     
     if (data.retCode !== 0) {
-      console.error(`[Bybit] Order failed:`, data);
+      console.error(`[Bybit] MARKET order failed:`, data);
       return { 
         success: false, 
         orderId: "", 
@@ -277,10 +438,12 @@ async function placeBybitOrder(
     }
     
     const orderId = data.result?.orderId || "";
-    console.log(`[Bybit] Order placed successfully: ${orderId}`);
-    return { success: true, orderId };
+    const avgPrice = parseFloat(data.result?.avgPrice || "0");
+    
+    console.log(`[Bybit] MARKET order filled: ${orderId} @ avg price ${avgPrice}`);
+    return { success: true, orderId, executedPrice: avgPrice };
   } catch (error) {
-    console.error(`[Bybit] Exception:`, error);
+    console.error(`[Bybit] MARKET order exception:`, error);
     return { 
       success: false, 
       orderId: "", 
@@ -290,36 +453,115 @@ async function placeBybitOrder(
 }
 
 // ============================================
-// UNIFIED ORDER PLACEMENT
+// BYBIT - PLACE LIMIT ORDER (TP)
 // ============================================
-async function placeExchangeLimitOrder(
+async function placeBybitLimitOrder(
+  credentials: ExchangeCredentials,
+  symbol: string,
+  side: string,
+  price: number,
+  quantity: number,
+  tradeType: "spot" | "futures"
+): Promise<OrderResult> {
+  try {
+    const timestamp = Date.now().toString();
+    const recvWindow = "5000";
+    const formattedSymbol = formatSymbol(symbol, "bybit", tradeType);
+    
+    const body = JSON.stringify({
+      category: tradeType === "futures" ? "linear" : "spot",
+      symbol: formattedSymbol,
+      side: side === "BUY" ? "Buy" : "Sell",
+      orderType: "Limit",
+      qty: formatQuantity(quantity, symbol),
+      price: formatPrice(price, symbol),
+      timeInForce: "GTC",
+    });
+    
+    const preHash = timestamp + credentials.apiKey + recvWindow + body;
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(preHash)
+      .digest("hex");
+    
+    console.log(`[Bybit] Placing LIMIT ${side} order: ${quantity} ${formattedSymbol} @ ${price}`);
+    
+    const response = await fetch("https://api.bybit.com/v5/order/create", {
+      method: "POST",
+      headers: {
+        "X-BAPI-API-KEY": credentials.apiKey,
+        "X-BAPI-SIGN": signature,
+        "X-BAPI-TIMESTAMP": timestamp,
+        "X-BAPI-RECV-WINDOW": recvWindow,
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+    
+    const data = await response.json();
+    
+    if (data.retCode !== 0) {
+      console.error(`[Bybit] LIMIT order failed:`, data);
+      return { 
+        success: false, 
+        orderId: "", 
+        error: data.retMsg || `Bybit API error: ${data.retCode}` 
+      };
+    }
+    
+    const orderId = data.result?.orderId || "";
+    console.log(`[Bybit] LIMIT order placed: ${orderId}`);
+    return { success: true, orderId };
+  } catch (error) {
+    console.error(`[Bybit] LIMIT order exception:`, error);
+    return { 
+      success: false, 
+      orderId: "", 
+      error: error instanceof Error ? error.message : "Unknown error" 
+    };
+  }
+}
+
+// ============================================
+// UNIFIED ENTRY ORDER (MARKET)
+// ============================================
+async function placeEntryOrder(
   exchange: { 
     exchange: string; 
     api_key_encrypted: string | null; 
     api_secret_encrypted: string | null;
     passphrase_encrypted: string | null;
   },
-  order: OrderParams,
-  isPaperTrade: boolean
-): Promise<{ orderId: string; isLive: boolean; error?: string }> {
-  console.log(`[${exchange.exchange}] Placing ${order.type} ${order.side} order: ${order.quantity} @ ${order.price}`);
+  symbol: string,
+  side: string,
+  quantity: number,
+  tradeType: "spot" | "futures",
+  isPaperTrade: boolean,
+  requestedPrice: number
+): Promise<{ orderId: string; isLive: boolean; executedPrice: number; error?: string }> {
+  console.log(`[${exchange.exchange}] Entry order: ${side} ${quantity} ${symbol} (Paper: ${isPaperTrade})`);
   
-  // Paper trading - return simulated order ID
+  // Paper trading - simulate entry
   if (isPaperTrade) {
-    console.log(`[PAPER] Simulated order for ${exchange.exchange}`);
+    const slippage = (Math.random() * 0.0004 + 0.0001);
+    const simulatedPrice = side === "BUY" 
+      ? requestedPrice * (1 + slippage)
+      : requestedPrice * (1 - slippage);
+    console.log(`[PAPER] Simulated entry at ${simulatedPrice.toFixed(6)}`);
     return { 
-      orderId: `TP-PAPER-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-      isLive: false 
+      orderId: `ENTRY-PAPER-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+      isLive: false,
+      executedPrice: simulatedPrice
     };
   }
   
   // Check if we have API credentials
   if (!exchange.api_key_encrypted || !exchange.api_secret_encrypted) {
-    console.log(`[${exchange.exchange}] No API credentials - falling back to simulation`);
+    console.error(`[${exchange.exchange}] NO API CREDENTIALS - CANNOT EXECUTE LIVE TRADE`);
     return { 
-      orderId: `TP-SIM-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+      orderId: "",
       isLive: false,
-      error: "No API credentials configured"
+      executedPrice: 0,
+      error: "No API credentials configured - cannot execute live trade"
     };
   }
   
@@ -330,40 +572,114 @@ async function placeExchangeLimitOrder(
     passphrase: exchange.passphrase_encrypted || undefined,
   };
   
-  let result: { success: boolean; orderId: string; error?: string };
+  let result: OrderResult;
   
   switch (exchange.exchange) {
     case "binance":
-      result = await placeBinanceOrder(credentials, order);
+      result = await placeBinanceMarketOrder(credentials, symbol, side, quantity, tradeType);
       break;
     case "okx":
-      result = await placeOKXOrder(credentials, order);
+      result = await placeOKXMarketOrder(credentials, symbol, side, quantity, tradeType);
       break;
     case "bybit":
-      result = await placeBybitOrder(credentials, order);
+      result = await placeBybitMarketOrder(credentials, symbol, side, quantity, tradeType);
       break;
     default:
-      console.log(`[${exchange.exchange}] Exchange not supported for live trading - falling back to simulation`);
+      console.error(`[${exchange.exchange}] Exchange not supported for live trading`);
       return { 
-        orderId: `TP-UNSUPPORTED-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+        orderId: "",
         isLive: false,
+        executedPrice: 0,
         error: `Exchange ${exchange.exchange} not supported for live trading`
       };
   }
   
   if (!result.success) {
-    console.error(`[${exchange.exchange}] Live order failed: ${result.error}`);
-    // Fall back to simulation on failure
+    console.error(`[${exchange.exchange}] ENTRY ORDER FAILED: ${result.error}`);
     return { 
-      orderId: `TP-FAILED-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+      orderId: "",
       isLive: false,
+      executedPrice: 0,
       error: result.error
     };
+  }
+  
+  return { 
+    orderId: result.orderId, 
+    isLive: true,
+    executedPrice: result.executedPrice || requestedPrice
+  };
+}
+
+// ============================================
+// UNIFIED TP ORDER (LIMIT)
+// ============================================
+async function placeTakeProfitOrder(
+  exchange: { 
+    exchange: string; 
+    api_key_encrypted: string | null; 
+    api_secret_encrypted: string | null;
+    passphrase_encrypted: string | null;
+  },
+  symbol: string,
+  side: string,
+  price: number,
+  quantity: number,
+  tradeType: "spot" | "futures",
+  isPaperTrade: boolean
+): Promise<{ orderId: string; isLive: boolean; error?: string }> {
+  console.log(`[${exchange.exchange}] TP order: ${side} ${quantity} ${symbol} @ ${price}`);
+  
+  if (isPaperTrade) {
+    console.log(`[PAPER] Simulated TP order`);
+    return { 
+      orderId: `TP-PAPER-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+      isLive: false 
+    };
+  }
+  
+  if (!exchange.api_key_encrypted || !exchange.api_secret_encrypted) {
+    return { 
+      orderId: "",
+      isLive: false,
+      error: "No API credentials"
+    };
+  }
+  
+  const credentials: ExchangeCredentials = {
+    exchange: exchange.exchange,
+    apiKey: exchange.api_key_encrypted,
+    apiSecret: exchange.api_secret_encrypted,
+    passphrase: exchange.passphrase_encrypted || undefined,
+  };
+  
+  let result: OrderResult;
+  
+  switch (exchange.exchange) {
+    case "binance":
+      result = await placeBinanceLimitOrder(credentials, symbol, side, price, quantity, tradeType);
+      break;
+    case "okx":
+      result = await placeOKXLimitOrder(credentials, symbol, side, price, quantity, tradeType);
+      break;
+    case "bybit":
+      result = await placeBybitLimitOrder(credentials, symbol, side, price, quantity, tradeType);
+      break;
+    default:
+      return { orderId: "", isLive: false, error: `Exchange ${exchange.exchange} not supported` };
+  }
+  
+  if (!result.success) {
+    console.error(`[${exchange.exchange}] TP ORDER FAILED: ${result.error}`);
+    return { orderId: "", isLive: false, error: result.error };
   }
   
   return { orderId: result.orderId, isLive: true };
 }
 
+// ============================================
+// MAIN HANDLER
+// ============================================
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -376,7 +692,12 @@ serve(async (req) => {
 
     const tradeRequest: TradeRequest = await req.json();
     
-    console.log("Executing trade:", JSON.stringify(tradeRequest, null, 2));
+    console.log("=== EXECUTE TRADE REQUEST ===");
+    console.log("Symbol:", tradeRequest.symbol);
+    console.log("Direction:", tradeRequest.direction);
+    console.log("Type:", tradeRequest.tradeType);
+    console.log("Size:", tradeRequest.orderSizeUsd);
+    console.log("Paper:", tradeRequest.isPaperTrade);
 
     // Validate order size
     if (tradeRequest.orderSizeUsd < 333 || tradeRequest.orderSizeUsd > 450) {
@@ -394,26 +715,45 @@ serve(async (req) => {
       throw new Error("Exchange not found");
     }
 
-    // Calculate quantity
+    // Calculate quantity and fees
     const quantity = tradeRequest.orderSizeUsd / tradeRequest.entryPrice;
     const leverage = tradeRequest.leverage || 1;
-    
-    // Calculate entry fee
     const feeRate = tradeRequest.tradeType === "spot" ? 0.001 : 0.0005;
     const entryFee = tradeRequest.orderSizeUsd * feeRate;
 
-    let orderId = `${exchange.exchange}-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    let executedPrice = tradeRequest.entryPrice;
+    // Determine entry side
+    const entrySide = tradeRequest.direction === "long" ? "BUY" : "SELL";
     
-    // Simulate slight slippage (0.01-0.05%)
-    const slippage = (Math.random() * 0.0004 + 0.0001);
-    if (tradeRequest.direction === "long") {
-      executedPrice *= (1 + slippage);
-    } else {
-      executedPrice *= (1 - slippage);
+    // ============================================
+    // STEP 1: PLACE ENTRY ORDER ON EXCHANGE
+    // ============================================
+    console.log("=== STEP 1: PLACING ENTRY ORDER ===");
+    
+    const entryResult = await placeEntryOrder(
+      exchange,
+      tradeRequest.symbol,
+      entrySide,
+      quantity,
+      tradeRequest.tradeType,
+      tradeRequest.isPaperTrade,
+      tradeRequest.entryPrice
+    );
+    
+    // HARD FAIL: If live trade and entry fails, abort entirely
+    if (!tradeRequest.isPaperTrade && !entryResult.isLive) {
+      console.error("=== LIVE ENTRY FAILED - ABORTING ===");
+      throw new Error(`Live entry order failed: ${entryResult.error}`);
     }
+    
+    const executedPrice = entryResult.executedPrice;
+    const entryOrderId = entryResult.orderId;
+    const isLive = entryResult.isLive;
+    
+    console.log(`Entry order result: ID=${entryOrderId}, Price=${executedPrice}, Live=${isLive}`);
 
-    // Calculate take-profit price
+    // ============================================
+    // STEP 2: CALCULATE TAKE-PROFIT PRICE
+    // ============================================
     const takeProfitPrice = calculateTakeProfitPrice(
       executedPrice,
       tradeRequest.direction,
@@ -424,9 +764,11 @@ serve(async (req) => {
       tradeRequest.tradeType
     );
 
-    console.log(`Take-profit price calculated: $${takeProfitPrice.toFixed(6)} for ${tradeRequest.direction} position`);
+    console.log(`TP price calculated: $${takeProfitPrice.toFixed(6)} for ${tradeRequest.direction}`);
 
-    // Create trade record
+    // ============================================
+    // STEP 3: CREATE TRADE RECORD
+    // ============================================
     const { data: trade, error: tradeError } = await supabase
       .from("trades")
       .insert({
@@ -441,6 +783,8 @@ serve(async (req) => {
         leverage,
         entry_fee: entryFee,
         is_paper_trade: tradeRequest.isPaperTrade,
+        is_live: isLive,
+        entry_order_id: entryOrderId,
         ai_score: tradeRequest.aiScore,
         ai_reasoning: tradeRequest.aiReasoning,
         status: "open",
@@ -453,29 +797,34 @@ serve(async (req) => {
 
     if (tradeError) throw tradeError;
 
-    // Place take-profit limit order on exchange
-    const tpOrderResult = await placeExchangeLimitOrder(
+    // ============================================
+    // STEP 4: PLACE TAKE-PROFIT ORDER
+    // ============================================
+    console.log("=== STEP 4: PLACING TP ORDER ===");
+    
+    const tpSide = tradeRequest.direction === "long" ? "SELL" : "BUY";
+    
+    const tpResult = await placeTakeProfitOrder(
       exchange,
-      {
-        symbol: tradeRequest.symbol,
-        side: tradeRequest.direction === "long" ? "SELL" : "BUY",
-        type: "LIMIT",
-        price: takeProfitPrice,
-        quantity: quantity,
-      },
+      tradeRequest.symbol,
+      tpSide,
+      takeProfitPrice,
+      quantity,
+      tradeRequest.tradeType,
       tradeRequest.isPaperTrade
     );
 
-    const takeProfitOrderId = tpOrderResult.orderId;
-    const isLiveOrder = tpOrderResult.isLive;
+    const takeProfitOrderId = tpResult.orderId;
     
-    console.log(`Take-profit order placed: ${takeProfitOrderId} @ $${takeProfitPrice.toFixed(6)} (Live: ${isLiveOrder})`);
+    console.log(`TP order result: ID=${takeProfitOrderId}, Live=${tpResult.isLive}`);
     
-    if (tpOrderResult.error) {
-      console.warn(`TP Order warning: ${tpOrderResult.error}`);
+    if (tpResult.error) {
+      console.warn(`TP Order warning: ${tpResult.error}`);
     }
 
-    // Create position record with take-profit info
+    // ============================================
+    // STEP 5: CREATE POSITION RECORD
+    // ============================================
     const { data: position, error: positionError } = await supabase
       .from("positions")
       .insert({
@@ -493,6 +842,8 @@ serve(async (req) => {
         profit_target: tradeRequest.profitTarget,
         unrealized_pnl: -entryFee,
         is_paper_trade: tradeRequest.isPaperTrade,
+        is_live: isLive,
+        entry_order_id: entryOrderId,
         status: "open",
         opened_at: new Date().toISOString(),
         take_profit_order_id: takeProfitOrderId,
@@ -505,25 +856,31 @@ serve(async (req) => {
 
     if (positionError) throw positionError;
 
-    // Create notification
-    const liveIndicator = isLiveOrder ? "🔴 LIVE" : "📝 Paper";
+    // ============================================
+    // STEP 6: CREATE NOTIFICATION
+    // ============================================
+    const liveIndicator = isLive ? "🔴 LIVE" : "📝 Paper";
     await supabase
       .from("notifications")
       .insert({
         user_id: exchange.user_id,
         type: "trade_opened",
         title: `${liveIndicator} ${tradeRequest.direction.toUpperCase()} ${tradeRequest.symbol}`,
-        message: `Opened ${tradeRequest.direction} position on ${exchange.exchange} at $${executedPrice.toFixed(4)}. Size: $${tradeRequest.orderSizeUsd.toFixed(2)}. TP @ $${takeProfitPrice.toFixed(4)}`,
+        message: `Opened ${tradeRequest.direction} on ${exchange.exchange} at $${executedPrice.toFixed(4)}. Size: $${tradeRequest.orderSizeUsd.toFixed(2)}. Entry Order: ${entryOrderId}. TP @ $${takeProfitPrice.toFixed(4)}`,
         trade_id: trade.id,
       });
 
-    console.log("Trade executed successfully:", trade.id, "| TP Order:", takeProfitOrderId, "| Live:", isLiveOrder);
+    console.log("=== TRADE EXECUTED SUCCESSFULLY ===");
+    console.log("Trade ID:", trade.id);
+    console.log("Entry Order:", entryOrderId);
+    console.log("TP Order:", takeProfitOrderId);
+    console.log("Is Live:", isLive);
 
     return new Response(JSON.stringify({
       success: true,
       trade: {
         id: trade.id,
-        orderId,
+        entryOrderId,
         symbol: tradeRequest.symbol,
         direction: tradeRequest.direction,
         entryPrice: executedPrice,
@@ -531,6 +888,7 @@ serve(async (req) => {
         orderSizeUsd: tradeRequest.orderSizeUsd,
         entryFee,
         isPaperTrade: tradeRequest.isPaperTrade,
+        isLive,
       },
       position: {
         id: position.id,
@@ -538,14 +896,15 @@ serve(async (req) => {
         takeProfitOrderId,
         takeProfitPrice,
         takeProfitStatus: "pending",
-        isLiveOrder,
+        isLive,
       },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
   } catch (error) {
-    console.error("Error executing trade:", error);
+    console.error("=== TRADE EXECUTION FAILED ===");
+    console.error("Error:", error);
     return new Response(JSON.stringify({
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
