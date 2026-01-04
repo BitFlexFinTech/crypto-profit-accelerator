@@ -10,6 +10,7 @@ import { ExecutionSpeed } from '@/components/dashboard/cards/ExecutionSpeed';
 import { VolatilityScanner } from '@/components/dashboard/cards/VolatilityScanner';
 import { TradeTiming } from '@/components/dashboard/cards/TradeTiming';
 import { LoopMonitor } from '@/components/dashboard/cards/LoopMonitor';
+import { GlobalSyncButton } from '@/components/dashboard/GlobalSyncButton';
 
 export default function DashboardPage() {
   return (
@@ -22,7 +23,10 @@ export default function DashboardPage() {
             <ConnectionStatus />
           </div>
         </div>
-        <BotControls />
+        <div className="flex items-center gap-3">
+          <GlobalSyncButton />
+          <BotControls />
+        </div>
       </div>
 
       <StatsCards />

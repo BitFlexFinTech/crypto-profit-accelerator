@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Activity, Flame } from 'lucide-react';
 import { useTrading } from '@/contexts/TradingContext';
@@ -8,40 +7,29 @@ interface VolatilityItem {
   symbol: string;
   volatility: number;
   trend: 'up' | 'down' | 'neutral';
-  recommendation: string;
+  change24h: number;
 }
 
 export function VolatilityScanner() {
-  const { signals, prices } = useTrading();
-  const [items, setItems] = useState<VolatilityItem[]>([]);
+  const { marketData } = useTrading();
 
-  useEffect(() => {
-    // Generate volatility data from signals
-    const volatilityItems: VolatilityItem[] = signals.map(signal => ({
-      symbol: signal.symbol,
-      volatility: signal.volatility === 'high' ? 85 + Math.random() * 15 :
-                  signal.volatility === 'medium' ? 50 + Math.random() * 35 :
-                  Math.random() * 50,
-      trend: signal.momentum === 'bullish' ? 'up' : signal.momentum === 'bearish' ? 'down' : 'neutral',
-      recommendation: signal.direction === 'long' ? 'BUY' : 'SELL',
-    }));
-
-    // Add some default pairs if no signals
-    if (volatilityItems.length === 0 && Object.keys(prices).length > 0) {
-      Object.keys(prices).slice(0, 6).forEach(symbol => {
-        volatilityItems.push({
-          symbol,
-          volatility: 30 + Math.random() * 40,
-          trend: Math.random() > 0.5 ? 'up' : Math.random() > 0.5 ? 'down' : 'neutral',
-          recommendation: Math.random() > 0.5 ? 'BUY' : 'SELL',
-        });
-      });
-    }
-
-    // Sort by volatility
-    volatilityItems.sort((a, b) => b.volatility - a.volatility);
-    setItems(volatilityItems.slice(0, 6));
-  }, [signals, prices]);
+  // Get volatility items from REAL market data only - NO MOCK DATA
+  const items: VolatilityItem[] = Object.values(marketData)
+    .filter(data => data && data.symbol && data.volatility !== undefined)
+    .map(data => {
+      const trend: 'up' | 'down' | 'neutral' = 
+        data.change24h > 0.5 ? 'up' : 
+        data.change24h < -0.5 ? 'down' : 'neutral';
+      
+      return {
+        symbol: data.symbol,
+        volatility: Math.min(data.volatility * 10, 100), // Scale volatility percentage
+        trend,
+        change24h: data.change24h,
+      };
+    })
+    .sort((a, b) => b.volatility - a.volatility)
+    .slice(0, 6);
 
   const getVolatilityColor = (vol: number) => {
     if (vol >= 70) return 'text-destructive bg-destructive/20';
@@ -63,13 +51,16 @@ export function VolatilityScanner() {
             <Flame className="h-4 w-4 text-primary" />
             Volatility Scanner
           </CardTitle>
-          <Activity className="h-4 w-4 text-muted-foreground animate-pulse" />
+          {items.length > 0 && (
+            <Activity className="h-4 w-4 text-muted-foreground animate-pulse" />
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
         {items.length === 0 ? (
           <div className="p-4 text-center text-muted-foreground text-sm">
-            No volatility data available
+            <p>Waiting for real-time data...</p>
+            <p className="text-xs mt-1">Connect exchanges to see volatility</p>
           </div>
         ) : (
           items.map((item, i) => (
@@ -104,7 +95,7 @@ export function VolatilityScanner() {
                 </div>
               </div>
               
-              {/* Trend & Recommendation */}
+              {/* Trend Indicator */}
               <div className="flex items-center gap-2">
                 <div className={cn(
                   "w-6 h-6 rounded flex items-center justify-center text-xs font-bold",

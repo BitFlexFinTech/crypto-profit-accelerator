@@ -127,6 +127,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const tradingLoopRef = useRef<NodeJS.Timeout | null>(null);
   const healthCheckRef = useRef<NodeJS.Timeout | null>(null);
   const initialConnectionMade = useRef(false);
+  const connectionStatesRef = useRef<Record<string, ConnectionState>>({});
+  const hasAutoSynced = useRef(false);
 
   // Fetch all data
   const fetchAllData = useCallback(async () => {
@@ -209,16 +211,20 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
 
     // Set connecting status
-    setConnectionStates(prev => ({
-      ...prev,
-      [exchangeName]: { 
-        connected: false, 
-        lastPing: null, 
-        latency: 0, 
-        status: 'connecting',
-        reconnectAttempts: prev[exchangeName]?.reconnectAttempts || 0,
-      },
-    }));
+    setConnectionStates(prev => {
+      const newState = {
+        ...prev,
+        [exchangeName]: { 
+          connected: false, 
+          lastPing: null, 
+          latency: 0, 
+          status: 'connecting' as const,
+          reconnectAttempts: prev[exchangeName]?.reconnectAttempts || 0,
+        },
+      };
+      connectionStatesRef.current = newState;
+      return newState;
+    });
 
     const connectWs = () => {
       let ws: WebSocket;
@@ -238,16 +244,20 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
       ws.onopen = () => {
         console.log(`${exchangeName} WebSocket connected`);
-        setConnectionStates(prev => ({
-          ...prev,
-          [exchangeName]: { 
-            connected: true, 
-            lastPing: new Date(), 
-            latency: 0, 
-            status: 'connected',
-            reconnectAttempts: 0,
-          },
-        }));
+        setConnectionStates(prev => {
+          const newState = {
+            ...prev,
+            [exchangeName]: { 
+              connected: true, 
+              lastPing: new Date(), 
+              latency: 0, 
+              status: 'connected' as const,
+              reconnectAttempts: 0,
+            },
+          };
+          connectionStatesRef.current = newState;
+          return newState;
+        });
 
         // Subscribe for OKX/Bybit
         if (exchangeName === 'okx') {
@@ -328,39 +338,52 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
       ws.onerror = (error) => {
         console.error(`${exchangeName} WebSocket error:`, error);
-        setConnectionStates(prev => ({
-          ...prev,
-          [exchangeName]: { ...prev[exchangeName], connected: false, status: 'error' },
-        }));
+        setConnectionStates(prev => {
+          const newState = {
+            ...prev,
+            [exchangeName]: { ...prev[exchangeName], connected: false, status: 'error' as const },
+          };
+          connectionStatesRef.current = newState;
+          return newState;
+        });
       };
 
       ws.onclose = () => {
         console.log(`${exchangeName} WebSocket closed`);
+        
+        // Use ref to get current state to avoid stale closure
+        const currentState = connectionStatesRef.current[exchangeName];
+        const attempts = (currentState?.reconnectAttempts || 0) + 1;
+        
         setConnectionStates(prev => {
-          const currentState = prev[exchangeName];
-          const attempts = (currentState?.reconnectAttempts || 0) + 1;
-          
-          return {
+          const newState = {
             ...prev,
             [exchangeName]: { 
-              ...currentState, 
+              ...prev[exchangeName], 
               connected: false, 
-              status: 'disconnected',
+              status: 'disconnected' as const,
               reconnectAttempts: attempts,
             },
           };
+          connectionStatesRef.current = newState;
+          return newState;
         });
         
         // Reconnect with exponential backoff
-        const currentState = connectionStates[exchangeName];
-        const attempts = (currentState?.reconnectAttempts || 0) + 1;
-        
         if (attempts <= MAX_RECONNECT_ATTEMPTS) {
           const delay = RECONNECT_BASE_DELAY * Math.pow(2, attempts - 1);
           console.log(`Reconnecting to ${exchangeName} in ${delay}ms (attempt ${attempts})`);
           reconnectTimeouts.current[exchangeName] = setTimeout(() => connectWs(), delay);
         } else {
           console.error(`Max reconnection attempts reached for ${exchangeName}`);
+          setConnectionStates(prev => {
+            const newState = {
+              ...prev,
+              [exchangeName]: { ...prev[exchangeName], status: 'error' as const },
+            };
+            connectionStatesRef.current = newState;
+            return newState;
+          });
         }
       };
 
@@ -368,7 +391,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     };
 
     connectWs();
-  }, [connectionStates]);
+  }, []);
 
   // Connect to all available exchanges on startup
   const connectAllExchanges = useCallback(() => {
@@ -547,8 +570,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           connectToExchange(exchangeName);
         }
       });
+      
+      // Auto-sync balances once when exchanges are first loaded
+      if (!hasAutoSynced.current && exchanges.some(e => e.is_connected && e.api_key_encrypted)) {
+        hasAutoSynced.current = true;
+        console.log('Auto-syncing balances on startup...');
+        syncBalances().catch(err => console.error('Auto-sync failed:', err));
+      }
     }
-  }, [exchanges, connectToExchange]);
+  }, [exchanges, connectToExchange, syncBalances]);
 
   // Set up real-time subscriptions
   useEffect(() => {
