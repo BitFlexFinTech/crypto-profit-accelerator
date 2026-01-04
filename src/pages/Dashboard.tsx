@@ -14,6 +14,7 @@ import { GlobalSyncButton } from '@/components/dashboard/GlobalSyncButton';
 import { RealTimePnL } from '@/components/dashboard/cards/RealTimePnL';
 import { SignalDebugPanel } from '@/components/dashboard/cards/SignalDebugPanel';
 import { TradeVelocityChart } from '@/components/dashboard/cards/TradeVelocityChart';
+import { TradeExecutionLogPanel } from '@/components/dashboard/cards/TradeExecutionLogPanel';
 
 export default function DashboardPage() {
   return (
@@ -34,8 +35,9 @@ export default function DashboardPage() {
 
       <StatsCards />
       
-      {/* Signal Debug Panel - Full Width */}
+      {/* Debug & Execution Panels - Full Width */}
       <SignalDebugPanel />
+      <TradeExecutionLogPanel />
       
       {/* Real-time P&L + Cards Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
