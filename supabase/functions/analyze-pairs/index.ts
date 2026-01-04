@@ -538,7 +538,11 @@ function determineDirectionFromTechnicals(
     else if (technicals.bbSignal === "sell") shortSignals += 1;
   }
   
-  return longSignals >= shortSignals ? "long" : "short";
+  // When signals are equal, randomly choose direction to balance long/short distribution
+  if (longSignals === shortSignals) {
+    return Math.random() > 0.5 ? "long" : "short";
+  }
+  return longSignals > shortSignals ? "long" : "short";
 }
 
 // ========== MAIN HANDLER ==========
