@@ -14,6 +14,7 @@ import HistoryPage from "@/pages/History";
 import SettingsPage from "@/pages/Settings";
 import RiskManagementPage from "@/pages/RiskManagement";
 import TradeAnalyticsPage from "@/pages/TradeAnalytics";
+import PerformanceAnalyticsPage from "@/pages/PerformanceAnalytics";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -45,6 +46,7 @@ const App = () => (
               <Route path="/history" element={<MainLayout><HistoryPage /></MainLayout>} />
               <Route path="/risk-management" element={<MainLayout><RiskManagementPage /></MainLayout>} />
               <Route path="/trade-analytics" element={<MainLayout><TradeAnalyticsPage /></MainLayout>} />
+              <Route path="/performance" element={<MainLayout><PerformanceAnalyticsPage /></MainLayout>} />
               <Route path="/settings" element={<MainLayout><SettingsPage /></MainLayout>} />
               <Route path="*" element={<NotFound />} />
             </Routes>

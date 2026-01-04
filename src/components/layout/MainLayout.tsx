@@ -12,7 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Shield,
-  LineChart
+  LineChart,
+  Target
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -21,6 +22,7 @@ const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/portfolio', label: 'Portfolio', icon: Wallet },
   { path: '/analytics', label: 'Analytics', icon: PieChart },
+  { path: '/performance', label: 'Performance', icon: Target },
   { path: '/charts', label: 'Charts', icon: BarChart3 },
   { path: '/positions', label: 'Positions', icon: TrendingUp },
   { path: '/history', label: 'History', icon: History },

@@ -19,6 +19,7 @@ import { TradePerformancePanel } from '@/components/dashboard/cards/TradePerform
 import { PairPerformanceLeaderboard } from '@/components/dashboard/cards/PairPerformanceLeaderboard';
 import { WebSocketStatusPanel } from '@/components/dashboard/cards/WebSocketStatusPanel';
 import { TradeVelocityDashboard } from '@/components/dashboard/cards/TradeVelocityDashboard';
+import { TakeProfitStatusPanel } from '@/components/dashboard/cards/TakeProfitStatusPanel';
 
 export default function DashboardPage() {
   return (
@@ -81,6 +82,11 @@ export default function DashboardPage() {
         <div className="grid gap-3 lg:grid-cols-2">
           <PositionsPanel />
           <LiveSignals />
+        </div>
+
+        {/* Take-Profit Status */}
+        <div className="grid gap-3 lg:grid-cols-2">
+          <TakeProfitStatusPanel />
         </div>
       </div>
     </div>
