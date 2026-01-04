@@ -370,8 +370,25 @@ CRITICAL REQUIREMENTS:
 - Pairs with low win rates (<30%) should be AVOIDED
 - Target: UNDER 5 MINUTES to hit $1 (spot) or $3 (futures) profit
 
+🚨 CRITICAL DIRECTION RULES - YOU MUST FOLLOW THESE:
+1. You MUST return a MIX of LONG and SHORT signals - aim for at least 40% in each direction
+2. If priceChange1h is NEGATIVE, strongly consider SHORT positions
+3. If priceChange1h is POSITIVE, strongly consider LONG positions
+4. If price is near high24h (top 30% of range), favor SHORT
+5. If price is near low24h (bottom 30% of range), favor LONG
+6. NEVER default to all longs - analyze each pair independently
+7. Return AT LEAST 2 SHORT signals if ANY bearish momentum detected
+
 Market Data (sorted by opportunity score, includes historical performance):
 ${JSON.stringify(topCandidates, null, 2)}
+
+Direction Analysis Helper:
+${topCandidates.slice(0, 5).map(c => {
+  const range = c.high24h - c.low24h;
+  const positionInRange = range > 0 ? ((c.price - c.low24h) / range) * 100 : 50;
+  const suggestedDir = c.priceChange1h < -0.3 ? 'SHORT' : c.priceChange1h > 0.3 ? 'LONG' : (positionInRange > 70 ? 'SHORT' : positionInRange < 30 ? 'LONG' : 'NEUTRAL');
+  return `${c.symbol}: 1h change ${c.priceChange1h.toFixed(2)}%, position in range ${positionInRange.toFixed(0)}% → Suggested: ${suggestedDir}`;
+}).join('\n')}
 
 Historical Performance Key:
 - historicalWinRate: Past win rate (higher = better)
@@ -385,7 +402,7 @@ Trading Parameters:
 - STRICT RULE: Futures trades MUST target $3 profit after all fees
 
 For the top 5 FASTEST opportunities, provide:
-1. Direction (long/short) based on momentum and trend
+1. Direction (long/short) - CAREFULLY analyze momentum. SHORT when bearish, LONG when bullish
 2. Confidence level (0-1) - higher for pairs with good historical performance
 3. Estimated time to reach profit target (be aggressive, aim for <5 min)
 4. Brief reasoning focusing on WHY this pair will hit target quickly
@@ -394,14 +411,21 @@ AVOID pairs with:
 - historicalWinRate < 0.3
 - historicalAvgDuration > 1200 (20 minutes)
 
-Respond ONLY with a JSON array:
+Respond ONLY with a JSON array (MUST include both long AND short signals):
 [
   {
     "symbol": "BTC/USDT",
     "direction": "long",
     "confidence": 0.85,
     "timeToProfit": "2-3 min",
-    "reasoning": "High volatility, strong momentum, historical avg close time 180s"
+    "reasoning": "Bullish momentum +0.8% 1h, near daily low, historical avg close time 180s"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "direction": "short",
+    "confidence": 0.80,
+    "timeToProfit": "2-4 min",
+    "reasoning": "Bearish momentum -0.5% 1h, near daily high, good for quick short scalp"
   }
 ]`;
 
@@ -422,21 +446,40 @@ Respond ONLY with a JSON array:
 
     if (!aiResponse.ok) {
       console.error("AI API error:", await aiResponse.text());
-      // Fall back to algorithmic analysis
-      const signals: TradingSignal[] = topCandidates.slice(0, 5).map(candidate => ({
-        exchange: candidate.exchange,
-        symbol: candidate.symbol,
-        direction: candidate.momentum === "bullish" ? "long" : candidate.momentum === "bearish" ? "short" : (Math.random() > 0.5 ? "long" : "short"),
-        score: candidate.score,
-        confidence: Math.min(candidate.score / 100, 0.9),
-        volatility: candidate.volatility,
-        momentum: candidate.momentum,
-        estimatedTimeToProfit: candidate.volatility === "high" ? "1-3 min" : candidate.volatility === "medium" ? "3-8 min" : "8-15 min",
-        entryPrice: candidate.price,
-        targetPrice: candidate.price * (candidate.momentum === "bullish" ? 1.001 : 0.999),
-        reasoning: `${candidate.momentum.charAt(0).toUpperCase() + candidate.momentum.slice(1)} momentum with ${candidate.volatility} volatility. 24h change: ${candidate.priceChange24h.toFixed(2)}%`,
-        tradeType: mode === "futures" ? "futures" : "spot",
-      }));
+      // Fall back to algorithmic analysis with PROPER direction detection
+      const signals: TradingSignal[] = topCandidates.slice(0, 5).map(candidate => {
+        // Calculate direction based on momentum AND price position in range
+        const range = candidate.high24h - candidate.low24h;
+        const positionInRange = range > 0 ? (candidate.price - candidate.low24h) / range : 0.5;
+        
+        let direction: "long" | "short";
+        if (candidate.priceChange1h < -0.3) {
+          direction = "short"; // Bearish momentum = short
+        } else if (candidate.priceChange1h > 0.3) {
+          direction = "long"; // Bullish momentum = long
+        } else if (positionInRange > 0.7) {
+          direction = "short"; // Near high = short
+        } else if (positionInRange < 0.3) {
+          direction = "long"; // Near low = long
+        } else {
+          direction = candidate.momentum === "bearish" ? "short" : "long";
+        }
+        
+        return {
+          exchange: candidate.exchange,
+          symbol: candidate.symbol,
+          direction,
+          score: candidate.score,
+          confidence: Math.min(candidate.score / 100, 0.9),
+          volatility: candidate.volatility,
+          momentum: candidate.momentum,
+          estimatedTimeToProfit: candidate.volatility === "high" ? "1-3 min" : candidate.volatility === "medium" ? "3-8 min" : "8-15 min",
+          entryPrice: candidate.price,
+          targetPrice: candidate.price * (direction === "long" ? 1.001 : 0.999),
+          reasoning: `${direction.toUpperCase()} - ${candidate.momentum} momentum, ${(positionInRange * 100).toFixed(0)}% in daily range, 1h: ${candidate.priceChange1h > 0 ? '+' : ''}${candidate.priceChange1h.toFixed(2)}%`,
+          tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
+        };
+      });
 
       return new Response(JSON.stringify({
         signals,
@@ -466,38 +509,78 @@ Respond ONLY with a JSON array:
     const signals: TradingSignal[] = aiSignals.slice(0, 5).map((aiSignal: any, index: number) => {
       const marketInfo = topCandidates.find(c => c.symbol === aiSignal.symbol) || topCandidates[index];
       
+      // Validate and default direction based on market data if AI didn't provide one
+      let direction: "long" | "short" = aiSignal.direction;
+      if (!direction || (direction !== "long" && direction !== "short")) {
+        // Use momentum-based fallback
+        if (marketInfo) {
+          const range = marketInfo.high24h - marketInfo.low24h;
+          const positionInRange = range > 0 ? (marketInfo.price - marketInfo.low24h) / range : 0.5;
+          
+          if (marketInfo.priceChange1h < -0.3) {
+            direction = "short";
+          } else if (marketInfo.priceChange1h > 0.3) {
+            direction = "long";
+          } else if (positionInRange > 0.7) {
+            direction = "short";
+          } else {
+            direction = "long";
+          }
+        } else {
+          direction = "long";
+        }
+      }
+      
       return {
         exchange: marketInfo?.exchange || exchanges[0] || "binance",
         symbol: aiSignal.symbol || marketInfo?.symbol || "BTC/USDT",
-        direction: aiSignal.direction || "long",
+        direction,
         score: marketInfo?.score || 50,
         confidence: aiSignal.confidence || 0.5,
         volatility: marketInfo?.volatility || "medium",
         momentum: marketInfo?.momentum || "neutral",
         estimatedTimeToProfit: aiSignal.timeToProfit || "5-10 min",
         entryPrice: marketInfo?.price || 0,
-        targetPrice: marketInfo?.price ? marketInfo.price * (aiSignal.direction === "long" ? 1.001 : 0.999) : 0,
+        targetPrice: marketInfo?.price ? marketInfo.price * (direction === "long" ? 1.001 : 0.999) : 0,
         reasoning: aiSignal.reasoning || "AI-generated signal",
         tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
       };
     });
 
-    // If no AI signals, use algorithmic
+    // If no AI signals, use algorithmic with proper direction detection
     if (signals.length === 0) {
-      const fallbackSignals: TradingSignal[] = topCandidates.slice(0, 5).map(candidate => ({
-        exchange: candidate.exchange,
-        symbol: candidate.symbol,
-        direction: candidate.momentum === "bullish" ? "long" : "short" as "long" | "short",
-        score: candidate.score,
-        confidence: Math.min(candidate.score / 100, 0.9),
-        volatility: candidate.volatility,
-        momentum: candidate.momentum,
-        estimatedTimeToProfit: candidate.volatility === "high" ? "1-3 min" : "5-10 min",
-        entryPrice: candidate.price,
-        targetPrice: candidate.price * 1.001,
-        reasoning: `${candidate.momentum} momentum with ${candidate.volatility} volatility`,
-        tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
-      }));
+      const fallbackSignals: TradingSignal[] = topCandidates.slice(0, 5).map(candidate => {
+        const range = candidate.high24h - candidate.low24h;
+        const positionInRange = range > 0 ? (candidate.price - candidate.low24h) / range : 0.5;
+        
+        let direction: "long" | "short";
+        if (candidate.priceChange1h < -0.3) {
+          direction = "short";
+        } else if (candidate.priceChange1h > 0.3) {
+          direction = "long";
+        } else if (positionInRange > 0.7) {
+          direction = "short";
+        } else if (positionInRange < 0.3) {
+          direction = "long";
+        } else {
+          direction = candidate.momentum === "bearish" ? "short" : "long";
+        }
+        
+        return {
+          exchange: candidate.exchange,
+          symbol: candidate.symbol,
+          direction,
+          score: candidate.score,
+          confidence: Math.min(candidate.score / 100, 0.9),
+          volatility: candidate.volatility,
+          momentum: candidate.momentum,
+          estimatedTimeToProfit: candidate.volatility === "high" ? "1-3 min" : "5-10 min",
+          entryPrice: candidate.price,
+          targetPrice: candidate.price * (direction === "long" ? 1.001 : 0.999),
+          reasoning: `${direction.toUpperCase()} - ${candidate.momentum} momentum with ${candidate.volatility} volatility`,
+          tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
+        };
+      });
 
       return new Response(JSON.stringify({
         signals: fallbackSignals,
