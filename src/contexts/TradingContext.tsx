@@ -94,12 +94,14 @@ const WS_ENDPOINTS: Record<string, string> = {
   kucoin: 'wss://ws-api-spot.kucoin.com',
 };
 
-const DEFAULT_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'BNB/USDT', 'ADA/USDT', 'AVAX/USDT'];
+const DEFAULT_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'BNB/USDT', 'ADA/USDT', 'AVAX/USDT', 'MATIC/USDT', 'LINK/USDT', 'DOT/USDT', 'ATOM/USDT'];
 const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY = 1000;
-const REST_FALLBACK_INTERVAL = 5000; // 5 seconds
-const BACKGROUND_SCAN_INTERVAL = 30000; // 30 seconds
+const REST_FALLBACK_INTERVAL = 2000; // 2 seconds - faster price updates
+const BACKGROUND_SCAN_INTERVAL = 5000; // 5 seconds - faster AI analysis
+const TRADING_LOOP_INTERVAL = 3000; // 3 seconds - fast trade execution
+const PROFIT_CHECK_INTERVAL = 1000; // 1 second - instant profit target checks
 
 export function TradingProvider({ children }: { children: ReactNode }) {
   // Core state
@@ -136,10 +138,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const healthCheckRef = useRef<NodeJS.Timeout | null>(null);
   const restFallbackRef = useRef<NodeJS.Timeout | null>(null);
   const backgroundScanRef = useRef<NodeJS.Timeout | null>(null);
+  const profitCheckRef = useRef<NodeJS.Timeout | null>(null);
   const initialConnectionMade = useRef(false);
   const connectionStatesRef = useRef<Record<string, ConnectionState>>({});
   const hasAutoSynced = useRef(false);
   const isRunningRef = useRef(false);
+  const lastProfitCheckRef = useRef<number>(0);
 
   // Fetch all data
   const fetchAllData = useCallback(async () => {
@@ -542,35 +546,46 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [exchanges, settings, isScanning, isEngineRunning, engineStatus]);
 
-  // Trading loop - runs when bot is started
+  // Fast profit target checking - runs every second
+  const checkProfitTargets = useCallback(async () => {
+    if (!isRunningRef.current || !settings?.is_bot_running) return;
+    
+    // Prevent overlapping checks
+    const now = Date.now();
+    if (now - lastProfitCheckRef.current < 500) return;
+    lastProfitCheckRef.current = now;
+    
+    for (const position of positions) {
+      const profitTarget = position.trade_type === 'futures'
+        ? settings.futures_profit_target
+        : settings.spot_profit_target;
+
+      if (position.unrealized_pnl >= profitTarget) {
+        console.log(`🎯 Position ${position.symbol} hit $${profitTarget} profit target! Closing NOW...`);
+        setEngineStatus('trading');
+        
+        try {
+          await invokeWithRetry(() => 
+            supabase.functions.invoke('close-position', { body: { positionId: position.id } })
+          );
+          setPositions(prev => prev.filter(p => p.id !== position.id));
+          console.log(`✅ Position ${position.symbol} closed successfully`);
+        } catch (err) {
+          console.error(`Failed to close position ${position.id}:`, err);
+        }
+      }
+    }
+  }, [settings, positions]);
+
+  // Trading loop - runs when bot is started (fast execution)
   const runTradingLoop = useCallback(async () => {
     if (!isRunningRef.current || !settings?.is_bot_running) return;
     
+    const cycleStart = Date.now();
+    
     try {
-      // Check positions for profit targets
-      for (const position of positions) {
-        const profitTarget = position.trade_type === 'futures'
-          ? settings.futures_profit_target
-          : settings.spot_profit_target;
-
-        if (position.unrealized_pnl >= profitTarget) {
-          console.log(`Position ${position.symbol} hit $${profitTarget} profit target, closing...`);
-          setEngineStatus('trading');
-          
-          try {
-            await invokeWithRetry(() => 
-              supabase.functions.invoke('close-position', { body: { positionId: position.id } })
-            );
-            setPositions(prev => prev.filter(p => p.id !== position.id));
-          } catch (err) {
-            console.error(`Failed to close position ${position.id}:`, err);
-          }
-        }
-      }
-
       // Check if we're at max positions
       if (positions.length >= (settings.max_open_positions || 10)) {
-        console.log('Max positions reached, monitoring only');
         setEngineStatus('monitoring');
         return;
       }
@@ -579,19 +594,33 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       if (signals.length > 0) {
         const topSignal = signals[0];
         
-        // Determine confidence threshold based on aggressiveness
-        const confidenceThreshold = settings.ai_aggressiveness === 'aggressive' ? 0.5 :
-                                   settings.ai_aggressiveness === 'conservative' ? 0.8 : 0.65;
+        // Determine confidence threshold based on aggressiveness (lowered for faster trading)
+        const confidenceThreshold = settings.ai_aggressiveness === 'aggressive' ? 0.4 :
+                                   settings.ai_aggressiveness === 'conservative' ? 0.7 : 0.5;
         
-        if (topSignal.confidence >= confidenceThreshold && topSignal.score >= 60) {
+        // Lowered score threshold from 60 to 45 for more trading opportunities
+        const scoreThreshold = settings.ai_aggressiveness === 'aggressive' ? 40 :
+                              settings.ai_aggressiveness === 'conservative' ? 60 : 45;
+        
+        console.log(`📊 Top signal: ${topSignal.symbol} | Score: ${topSignal.score} (need ${scoreThreshold}) | Confidence: ${(topSignal.confidence * 100).toFixed(1)}% (need ${(confidenceThreshold * 100).toFixed(1)}%)`);
+        
+        if (topSignal.confidence >= confidenceThreshold && topSignal.score >= scoreThreshold) {
           setEngineStatus('trading');
           
           // Find exchange
           const exchange = exchanges.find(e => e.exchange === topSignal.exchange && e.is_connected);
           if (!exchange) {
-            console.log(`Exchange ${topSignal.exchange} not connected`);
-            return;
+            console.log(`⚠️ Exchange ${topSignal.exchange} not connected, trying others...`);
+            // Try to find any connected exchange
+            const anyExchange = exchanges.find(e => e.is_connected);
+            if (!anyExchange) {
+              setEngineStatus('monitoring');
+              return;
+            }
           }
+          
+          const targetExchange = exchange || exchanges.find(e => e.is_connected);
+          if (!targetExchange) return;
 
           // Calculate order size
           const orderSize = Math.min(
@@ -604,13 +633,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             ? settings.futures_profit_target 
             : settings.spot_profit_target;
 
-          console.log(`Executing trade: ${topSignal.direction} ${topSignal.symbol} @ ${topSignal.entryPrice}`);
+          console.log(`🚀 EXECUTING TRADE: ${topSignal.direction.toUpperCase()} ${topSignal.symbol} @ $${topSignal.entryPrice} | Size: $${orderSize} | Target: +$${profitTarget}`);
 
           try {
+            const execStart = Date.now();
             await invokeWithRetry(() => 
               supabase.functions.invoke('execute-trade', {
                 body: {
-                  exchangeId: exchange.id,
+                  exchangeId: targetExchange.id,
                   symbol: topSignal.symbol,
                   direction: topSignal.direction,
                   tradeType: topSignal.tradeType,
@@ -624,17 +654,27 @@ export function TradingProvider({ children }: { children: ReactNode }) {
                 },
               })
             );
+            
+            const execTime = Date.now() - execStart;
+            console.log(`✅ Trade executed in ${execTime}ms`);
 
             setEngineMetrics(prev => ({
               ...prev,
               tradesPerHour: prev.tradesPerHour + 1,
+              executionTime: execTime,
             }));
           } catch (err) {
-            console.error('Trade execution failed:', err);
+            console.error('❌ Trade execution failed:', err);
           }
+        } else {
+          console.log(`⏳ Signal below threshold, waiting for better opportunity...`);
         }
+      } else {
+        console.log(`🔍 No signals yet, waiting for AI analysis...`);
       }
 
+      const cycleTime = Date.now() - cycleStart;
+      setEngineMetrics(prev => ({ ...prev, cycleTime }));
       setEngineStatus('monitoring');
     } catch (error) {
       console.error('Trading loop error:', error);
@@ -657,13 +697,18 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setSettings(prev => prev ? { ...prev, is_bot_running: true } : null);
       setEngineStatus('monitoring');
       
-      // Start trading loop
+      // Start fast trading loop (every 3 seconds)
       runTradingLoop();
-      tradingLoopRef.current = setInterval(runTradingLoop, 30000);
+      tradingLoopRef.current = setInterval(runTradingLoop, TRADING_LOOP_INTERVAL);
+      
+      // Start fast profit target checking (every 1 second)
+      profitCheckRef.current = setInterval(checkProfitTargets, PROFIT_CHECK_INTERVAL);
+      
+      console.log('🤖 Trading bot started - Loop: 3s, Profit check: 1s, AI scan: 5s');
     } catch (error) {
       console.error('Error starting bot:', error);
     }
-  }, [settings, runTradingLoop]);
+  }, [settings, runTradingLoop, checkProfitTargets]);
 
   // Stop bot
   const stopBot = useCallback(async () => {
@@ -680,11 +725,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setSettings(prev => prev ? { ...prev, is_bot_running: false } : null);
       setEngineStatus('idle');
       
-      // Stop trading loop but keep background scanning
+      // Stop trading loop and profit checking but keep background scanning
       if (tradingLoopRef.current) {
         clearInterval(tradingLoopRef.current);
         tradingLoopRef.current = null;
       }
+      if (profitCheckRef.current) {
+        clearInterval(profitCheckRef.current);
+        profitCheckRef.current = null;
+      }
+      console.log('🛑 Trading bot stopped');
     } catch (error) {
       console.error('Error stopping bot:', error);
     }
@@ -900,29 +950,38 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       if (tradingLoopRef.current) clearInterval(tradingLoopRef.current);
       if (restFallbackRef.current) clearInterval(restFallbackRef.current);
       if (backgroundScanRef.current) clearInterval(backgroundScanRef.current);
+      if (profitCheckRef.current) clearInterval(profitCheckRef.current);
     };
   }, [runHealthCheck]);
 
-  // Update position prices from WebSocket/REST data
+  // Update position prices from WebSocket/REST data - optimized for speed
   useEffect(() => {
-    positions.forEach(position => {
+    if (positions.length === 0) return;
+    
+    let hasUpdates = false;
+    const updatedPositions = positions.map(position => {
       const currentPrice = prices[position.symbol];
-      if (currentPrice && currentPrice !== position.current_price) {
-        setPositions(prev => prev.map(p => {
-          if (p.id !== position.id) return p;
-          
-          let pnl: number;
-          if (p.direction === 'long') {
-            pnl = (currentPrice - p.entry_price) * p.quantity * (p.leverage || 1);
-          } else {
-            pnl = (p.entry_price - currentPrice) * p.quantity * (p.leverage || 1);
-          }
-          
-          return { ...p, current_price: currentPrice, unrealized_pnl: pnl };
-        }));
+      if (!currentPrice || currentPrice === position.current_price) return position;
+      
+      hasUpdates = true;
+      let pnl: number;
+      if (position.direction === 'long') {
+        pnl = (currentPrice - position.entry_price) * position.quantity * (position.leverage || 1);
+      } else {
+        pnl = (position.entry_price - currentPrice) * position.quantity * (position.leverage || 1);
       }
+      
+      return { ...position, current_price: currentPrice, unrealized_pnl: pnl };
     });
-  }, [prices]);
+    
+    if (hasUpdates) {
+      setPositions(updatedPositions);
+      // Trigger immediate profit check when prices update
+      if (isRunningRef.current) {
+        checkProfitTargets();
+      }
+    }
+  }, [prices, checkProfitTargets]);
 
   const value: TradingContextType = {
     prices,

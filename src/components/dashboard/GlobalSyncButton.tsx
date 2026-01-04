@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTrading } from '@/contexts/TradingContext';
 import { Button } from '@/components/ui/button';
 import { RefreshCw, Settings, Clock } from 'lucide-react';
@@ -12,7 +12,11 @@ export function GlobalSyncButton() {
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const navigate = useNavigate();
 
-  const connectedExchanges = exchanges.filter(e => e.is_connected);
+  // Memoize connected exchanges to prevent infinite re-renders
+  const connectedExchanges = useMemo(
+    () => exchanges.filter(e => e.is_connected),
+    [exchanges]
+  );
   const hasExchanges = connectedExchanges.length > 0;
 
   // Get the most recent sync time from exchanges
