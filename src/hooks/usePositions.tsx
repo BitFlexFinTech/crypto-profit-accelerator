@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Position } from '@/types/trading';
 import { useToast } from '@/hooks/use-toast';
@@ -61,13 +61,27 @@ export function usePositions() {
     };
   };
 
+  const closingPositionsRef = useRef<Set<string>>(new Set());
+
   const closePosition = async (positionId: string) => {
+    // Prevent duplicate close attempts
+    if (closingPositionsRef.current.has(positionId)) {
+      console.log('Already closing position:', positionId);
+      return;
+    }
+    closingPositionsRef.current.add(positionId);
+
     try {
-      const { error } = await supabase.functions.invoke('close-position', {
+      const { data, error } = await supabase.functions.invoke('close-position', {
         body: { positionId },
       });
 
       if (error) throw error;
+
+      // Handle idempotent response
+      if (data?.alreadyClosed) {
+        console.log('Position was already closed:', positionId);
+      }
 
       toast({
         title: 'Success',
@@ -82,6 +96,8 @@ export function usePositions() {
         description: 'Failed to close position',
         variant: 'destructive',
       });
+    } finally {
+      closingPositionsRef.current.delete(positionId);
     }
   };
 

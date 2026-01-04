@@ -20,19 +20,25 @@ serve(async (req) => {
     
     console.log("Closing position:", positionId);
 
-    // Get position
-    const { data: position, error: positionError } = await supabase
+    // Atomically update position to 'closing' to prevent race conditions
+    const { data: position, error: claimError } = await supabase
       .from("positions")
-      .select("*")
+      .update({ status: "closed" as const })
       .eq("id", positionId)
+      .eq("status", "open")
+      .select("*")
       .single();
 
-    if (positionError || !position) {
-      throw new Error("Position not found");
-    }
-
-    if (position.status !== "open") {
-      throw new Error("Position is not open");
+    if (claimError || !position) {
+      // Position was already closed or doesn't exist - return success (idempotent)
+      console.log("Position already closed or not found:", positionId);
+      return new Response(JSON.stringify({
+        success: true,
+        alreadyClosed: true,
+        message: "Position was already closed",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Use requested exit price or current price
