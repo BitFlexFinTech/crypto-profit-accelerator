@@ -55,7 +55,7 @@ export function ExecutionSpeed() {
   const speedPercentage = (overallScore / Math.max(metrics.length, 1)) * 100;
 
   return (
-    <Card className="h-[200px] overflow-hidden">
+    <Card className="h-full overflow-hidden flex flex-col">
       <CardHeader className="py-2 px-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">

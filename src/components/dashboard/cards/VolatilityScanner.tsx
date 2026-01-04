@@ -43,7 +43,7 @@ export function VolatilityScanner() {
   };
 
   return (
-    <Card className="h-[200px] overflow-hidden flex flex-col">
+    <Card className="h-full overflow-hidden flex flex-col">
       <CardHeader className="py-2 px-3 flex-shrink-0">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">

@@ -52,7 +52,7 @@ export function TradeTiming() {
   };
 
   return (
-    <Card className="h-[200px] overflow-hidden flex flex-col">
+    <Card className="h-full overflow-hidden flex flex-col">
       <CardHeader className="py-2 px-3 flex-shrink-0">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -105,7 +105,7 @@ export function TradeTiming() {
         ) : (
           advice.map((item, i) => (
             <div
-              key={item.symbol}
+              key={`${item.symbol}-${i}`}
               className="flex items-center justify-between p-1.5 rounded bg-secondary/30"
             >
               <div className="flex items-center gap-1.5">

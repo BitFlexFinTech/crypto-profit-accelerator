@@ -75,7 +75,7 @@ export function RealTimePnL() {
   }
 
   return (
-    <Card className="col-span-2 overflow-hidden">
+    <Card className="h-full overflow-hidden flex flex-col">
       <CardHeader className="py-2 px-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm flex items-center gap-2">
