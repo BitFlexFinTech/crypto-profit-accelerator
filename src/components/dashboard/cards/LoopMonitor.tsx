@@ -64,7 +64,7 @@ export function LoopMonitor() {
   const progress = (completedSteps / steps.length) * 100;
 
   return (
-    <Card className="h-[200px] overflow-hidden">
+    <Card className="h-full overflow-hidden flex flex-col">
       <CardHeader className="py-2 px-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">

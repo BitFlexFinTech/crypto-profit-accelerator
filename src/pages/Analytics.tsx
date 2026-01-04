@@ -6,10 +6,10 @@ import {
   TrendingDown, 
   DollarSign, 
   Activity, 
-  PieChart,
   BarChart3,
   Clock,
-  Target
+  Target,
+  Wifi
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -29,6 +29,9 @@ import {
   Pie,
   Cell,
 } from 'recharts';
+import { WebSocketStatusPanel } from '@/components/dashboard/cards/WebSocketStatusPanel';
+import { TradePerformancePanel } from '@/components/dashboard/cards/TradePerformancePanel';
+import { PairPerformanceLeaderboard } from '@/components/dashboard/cards/PairPerformanceLeaderboard';
 
 export default function AnalyticsPage() {
   const { trades, positions, balances, signals, engineMetrics, isEngineRunning } = useTrading();
@@ -94,7 +97,7 @@ export default function AnalyticsPage() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="h-full overflow-auto p-4 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Bot Analytics</h1>
         <p className="text-muted-foreground">Comprehensive trading performance analysis</p>
@@ -122,75 +125,51 @@ export default function AnalyticsPage() {
       <Tabs defaultValue="performance" className="space-y-4">
         <TabsList className="bg-secondary">
           <TabsTrigger value="performance">Performance</TabsTrigger>
+          <TabsTrigger value="connections">Connections</TabsTrigger>
           <TabsTrigger value="distribution">Distribution</TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
         </TabsList>
 
         <TabsContent value="performance" className="space-y-4">
-          {/* Cumulative P&L Chart */}
-          <Card className="bg-card border-border">
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Cumulative P&L</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={cumulativeData}>
-                    <defs>
-                      <linearGradient id="pnlGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="pnl"
-                      stroke="hsl(var(--primary))"
-                      fill="url(#pnlGradient)"
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Trade Performance Panel - Moved from Dashboard */}
+          <TradePerformancePanel />
+          
+          {/* Pair Performance Leaderboard - Moved from Dashboard */}
+          <PairPerformanceLeaderboard />
+        </TabsContent>
 
-          {/* Daily P&L Chart */}
+        <TabsContent value="connections" className="space-y-4">
+          {/* WebSocket Status Panel - Moved from Dashboard */}
+          <div className="max-w-xl">
+            <WebSocketStatusPanel />
+          </div>
+
+          {/* Engine Metrics */}
           <Card className="bg-card border-border">
             <CardHeader>
-              <CardTitle className="text-sm font-medium">Daily Performance</CardTitle>
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Wifi className="h-4 w-4 text-primary" />
+                Engine Performance
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={dailyData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                      }}
-                    />
-                    <Bar
-                      dataKey="profit"
-                      fill="hsl(var(--primary))"
-                      radius={[4, 4, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="p-4 bg-secondary/50 rounded-lg">
+                  <p className="text-xs text-muted-foreground">Analysis Time</p>
+                  <p className="text-xl font-bold">{engineMetrics.analysisTime}ms</p>
+                </div>
+                <div className="p-4 bg-secondary/50 rounded-lg">
+                  <p className="text-xs text-muted-foreground">Execution Time</p>
+                  <p className="text-xl font-bold">{engineMetrics.executionTime}ms</p>
+                </div>
+                <div className="p-4 bg-secondary/50 rounded-lg">
+                  <p className="text-xs text-muted-foreground">Cycle Time</p>
+                  <p className="text-xl font-bold">{engineMetrics.cycleTime}ms</p>
+                </div>
+                <div className="p-4 bg-secondary/50 rounded-lg">
+                  <p className="text-xs text-muted-foreground">Trades/Hour</p>
+                  <p className="text-xl font-bold">{engineMetrics.tradesPerHour.toFixed(1)}</p>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -298,29 +277,70 @@ export default function AnalyticsPage() {
         </TabsContent>
 
         <TabsContent value="activity" className="space-y-4">
-          {/* Engine Metrics */}
+          {/* Cumulative P&L Chart */}
           <Card className="bg-card border-border">
             <CardHeader>
-              <CardTitle className="text-sm font-medium">Engine Performance</CardTitle>
+              <CardTitle className="text-sm font-medium">Cumulative P&L</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="p-4 bg-secondary/50 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Analysis Time</p>
-                  <p className="text-xl font-bold">{engineMetrics.analysisTime}ms</p>
-                </div>
-                <div className="p-4 bg-secondary/50 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Execution Time</p>
-                  <p className="text-xl font-bold">{engineMetrics.executionTime}ms</p>
-                </div>
-                <div className="p-4 bg-secondary/50 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Cycle Time</p>
-                  <p className="text-xl font-bold">{engineMetrics.cycleTime}ms</p>
-                </div>
-                <div className="p-4 bg-secondary/50 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Trades/Hour</p>
-                  <p className="text-xl font-bold">{engineMetrics.tradesPerHour.toFixed(1)}</p>
-                </div>
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={cumulativeData}>
+                    <defs>
+                      <linearGradient id="pnlGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="pnl"
+                      stroke="hsl(var(--primary))"
+                      fill="url(#pnlGradient)"
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Daily P&L Chart */}
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Daily Performance</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[250px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                    />
+                    <Bar
+                      dataKey="profit"
+                      fill="hsl(var(--primary))"
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </CardContent>
           </Card>

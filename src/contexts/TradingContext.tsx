@@ -1,10 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Position, Exchange, Balance, BotSettings, Trade } from '@/types/trading';
 import { rateLimiter } from '@/services/RateLimiter';
 import { invokeWithRetry } from '@/utils/retryWithBackoff';
 import { fetchAllPrices } from '@/services/PriceFetcher';
 import { wsManager, PriceUpdate } from '@/services/ExchangeWebSocketManager';
+import { tpOrderMonitor } from '@/services/TPOrderMonitor';
 
 type ExchangeName = 'binance' | 'okx' | 'nexo' | 'bybit' | 'kucoin' | 'hyperliquid';
 
@@ -830,7 +831,56 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [appendExecutionLog]);
 
-  // Trading loop (uses refs for stability) - NOW TRADES MULTIPLE PAIRS
+  // Calculate pair speed score based on historical trade data
+  // Target: 3-5 min trades. Pairs that close faster get higher scores.
+  const getPairSpeedScore = useCallback((symbol: string): number => {
+    const closedTrades = trades.filter(t => 
+      t.symbol === symbol && 
+      t.status === 'closed' && 
+      t.opened_at && 
+      t.closed_at
+    );
+    
+    if (closedTrades.length < 2) return 50; // Default for new pairs
+    
+    const avgDurationSec = closedTrades.reduce((sum, t) => {
+      const duration = (new Date(t.closed_at!).getTime() - new Date(t.opened_at!).getTime()) / 1000;
+      return sum + duration;
+    }, 0) / closedTrades.length;
+    
+    // Target: 3-5 minutes (180-300 seconds)
+    // Score 100 for pairs averaging ~3 min, decreases as duration increases
+    if (avgDurationSec < 180) return 100;
+    if (avgDurationSec < 300) return 90;
+    if (avgDurationSec < 600) return 60;
+    if (avgDurationSec < 900) return 30;
+    return 10; // Very slow pairs
+  }, [trades]);
+
+  // Build slow pair blacklist (pairs that consistently take > 10 min)
+  const slowPairBlacklist = useMemo(() => {
+    const pairDurations: Record<string, number[]> = {};
+    
+    trades
+      .filter(t => t.status === 'closed' && t.opened_at && t.closed_at)
+      .forEach(t => {
+        const durationMin = (new Date(t.closed_at!).getTime() - new Date(t.opened_at!).getTime()) / 1000 / 60;
+        if (!pairDurations[t.symbol]) pairDurations[t.symbol] = [];
+        pairDurations[t.symbol].push(durationMin);
+      });
+    
+    const blacklist: Set<string> = new Set();
+    Object.entries(pairDurations).forEach(([symbol, durations]) => {
+      if (durations.length >= 3) {
+        const avg = durations.reduce((a, b) => a + b, 0) / durations.length;
+        if (avg > 10) blacklist.add(symbol); // Blacklist if avg > 10 min with 3+ trades
+      }
+    });
+    
+    return blacklist;
+  }, [trades]);
+
+  // Trading loop (uses refs for stability) - VELOCITY OPTIMIZED for 3-5 min trades
   const runTradingLoop = useCallback(async () => {
     if (!isRunningRef.current) return;
     const currentSettings = settingsRef.current;
@@ -874,12 +924,18 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       // Build set of symbols already in position (to avoid duplicates)
       const positionSymbols = new Set(currentPositions.map(p => p.symbol));
 
+      // ⚡ VELOCITY OPTIMIZATION: Sort signals by speed score (faster pairs first)
+      const velocitySortedSignals = [...currentSignals]
+        .filter(s => !slowPairBlacklist.has(s.symbol)) // Exclude blacklisted slow pairs
+        .map(s => ({ ...s, speedScore: getPairSpeedScore(s.symbol) }))
+        .sort((a, b) => b.speedScore - a.speedScore); // Fastest first
+
       // Execute MULTIPLE signals per cycle (up to available slots and MAX_NEW_TRADES_PER_CYCLE)
       const maxTradesToExecute = Math.min(availableSlots, MAX_NEW_TRADES_PER_CYCLE);
       let tradesExecutedThisCycle = 0;
 
-      if (currentSignals.length > 0) {
-        for (const signal of currentSignals) {
+      if (velocitySortedSignals.length > 0) {
+        for (const signal of velocitySortedSignals) {
           if (tradesExecutedThisCycle >= maxTradesToExecute) break;
 
           // Skip if we already have a position on this symbol
@@ -941,9 +997,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             message: `Executed ${tradesExecutedThisCycle} trade(s) this cycle`,
           });
         } else {
+          const blacklistedCount = currentSignals.length - velocitySortedSignals.length;
           appendExecutionLog({
             type: 'LOOP_TICK',
-            message: `Evaluated ${currentSignals.length} signals, none passed filters`,
+            message: `Evaluated ${velocitySortedSignals.length} signals${blacklistedCount > 0 ? ` (${blacklistedCount} slow pairs blacklisted)` : ''}, none passed filters`,
           });
         }
       } else {
@@ -964,7 +1021,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       });
       setEngineStatus('error');
     }
-  }, [appendExecutionLog, executeTradeFromSignal]);
+  }, [appendExecutionLog, executeTradeFromSignal, getPairSpeedScore, slowPairBlacklist]);
 
   // Watchdog to ensure trading loop keeps running
   const runWatchdog = useCallback(() => {

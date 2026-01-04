@@ -74,7 +74,7 @@ export function SignalDebugPanel() {
   const canTestTrade = signals.length > 0 && connectedExchanges.length > 0;
 
   return (
-    <Card className="col-span-full">
+    <Card className="h-full overflow-hidden flex flex-col">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <CardTitle className="flex items-center gap-2 text-base">

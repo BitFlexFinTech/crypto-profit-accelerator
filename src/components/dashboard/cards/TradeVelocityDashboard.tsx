@@ -96,7 +96,7 @@ export function TradeVelocityDashboard() {
   const speedRating = getSpeedRating(velocityMetrics.avgTimeToProfit);
 
   return (
-    <Card className="bg-card border-border">
+    <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium flex items-center gap-2">
           <Zap className="h-4 w-4 text-primary" />

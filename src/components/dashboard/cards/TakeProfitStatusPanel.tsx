@@ -60,7 +60,7 @@ export function TakeProfitStatusPanel() {
   }, [trades, pendingTPOrders]);
 
   return (
-    <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+    <Card className="h-full border-border/50 bg-card/50 backdrop-blur-sm overflow-hidden flex flex-col">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">

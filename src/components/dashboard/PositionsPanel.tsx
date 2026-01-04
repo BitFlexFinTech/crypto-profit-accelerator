@@ -123,7 +123,7 @@ export function PositionsPanel() {
 
   if (loading) {
     return (
-      <Card className="bg-card border-border">
+      <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
         <CardHeader>
           <Skeleton className="h-6 w-40" />
         </CardHeader>
@@ -137,7 +137,7 @@ export function PositionsPanel() {
 
   return (
     <>
-      <Card className="bg-card border-border">
+      <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-foreground">Active Positions</CardTitle>

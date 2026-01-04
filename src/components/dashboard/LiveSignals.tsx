@@ -37,7 +37,7 @@ export function LiveSignals() {
   };
 
   return (
-    <Card className="bg-card border-border">
+    <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle className="text-foreground flex items-center gap-2">
