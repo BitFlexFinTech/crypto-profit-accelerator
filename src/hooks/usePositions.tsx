@@ -1,30 +1,24 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from './useAuth';
 import { Position } from '@/types/trading';
 import { useToast } from '@/hooks/use-toast';
 
 export function usePositions() {
-  const { user } = useAuth();
   const { toast } = useToast();
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user) {
-      fetchPositions();
-      subscribeToPositions();
-    }
-  }, [user]);
+    fetchPositions();
+    const cleanup = subscribeToPositions();
+    return cleanup;
+  }, []);
 
   const fetchPositions = async () => {
-    if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('positions')
         .select('*')
-        .eq('user_id', user.id)
         .eq('status', 'open')
         .order('opened_at', { ascending: false });
 
@@ -47,8 +41,6 @@ export function usePositions() {
   };
 
   const subscribeToPositions = () => {
-    if (!user) return;
-
     const channel = supabase
       .channel('positions-changes')
       .on(
@@ -57,7 +49,6 @@ export function usePositions() {
           event: '*',
           schema: 'public',
           table: 'positions',
-          filter: `user_id=eq.${user.id}`,
         },
         () => {
           fetchPositions();
@@ -96,9 +87,11 @@ export function usePositions() {
 
   const closeAllPositions = async () => {
     try {
-      const { error } = await supabase.functions.invoke('close-all-positions');
-
-      if (error) throw error;
+      for (const position of positions) {
+        await supabase.functions.invoke('close-position', {
+          body: { positionId: position.id },
+        });
+      }
 
       toast({
         title: 'Success',
@@ -116,6 +109,25 @@ export function usePositions() {
     }
   };
 
+  const updatePositionPrice = (positionId: string, currentPrice: number) => {
+    setPositions(prev => prev.map(p => {
+      if (p.id !== positionId) return p;
+      
+      let pnl: number;
+      if (p.direction === 'long') {
+        pnl = (currentPrice - p.entry_price) * p.quantity * (p.leverage || 1);
+      } else {
+        pnl = (p.entry_price - currentPrice) * p.quantity * (p.leverage || 1);
+      }
+      
+      return {
+        ...p,
+        current_price: currentPrice,
+        unrealized_pnl: pnl,
+      };
+    }));
+  };
+
   const getTotalUnrealizedPnl = (): number => {
     return positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
   };
@@ -125,6 +137,7 @@ export function usePositions() {
     loading,
     closePosition,
     closeAllPositions,
+    updatePositionPrice,
     getTotalUnrealizedPnl,
     refetch: fetchPositions,
   };

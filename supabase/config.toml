@@ -1,1 +1,13 @@
 project_id = "aygfzsqcjvpjazvhderl"
+
+[functions.analyze-pairs]
+verify_jwt = false
+
+[functions.sync-balances]
+verify_jwt = false
+
+[functions.execute-trade]
+verify_jwt = false
+
+[functions.close-position]
+verify_jwt = false

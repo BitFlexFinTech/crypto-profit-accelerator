@@ -23,7 +23,7 @@ export type Database = {
           locked: number | null
           total: number | null
           updated_at: string | null
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           available?: number | null
@@ -33,7 +33,7 @@ export type Database = {
           locked?: number | null
           total?: number | null
           updated_at?: string | null
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           available?: number | null
@@ -43,7 +43,7 @@ export type Database = {
           locked?: number | null
           total?: number | null
           updated_at?: string | null
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -69,7 +69,7 @@ export type Database = {
           min_order_size: number | null
           spot_profit_target: number | null
           updated_at: string | null
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           ai_aggressiveness?: string | null
@@ -84,7 +84,7 @@ export type Database = {
           min_order_size?: number | null
           spot_profit_target?: number | null
           updated_at?: string | null
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           ai_aggressiveness?: string | null
@@ -99,7 +99,7 @@ export type Database = {
           min_order_size?: number | null
           spot_profit_target?: number | null
           updated_at?: string | null
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -117,7 +117,7 @@ export type Database = {
           open_price: number | null
           total_fees: number | null
           total_trades: number | null
-          user_id: string
+          user_id: string | null
           winning_trades: number | null
         }
         Insert: {
@@ -133,7 +133,7 @@ export type Database = {
           open_price?: number | null
           total_fees?: number | null
           total_trades?: number | null
-          user_id: string
+          user_id?: string | null
           winning_trades?: number | null
         }
         Update: {
@@ -149,7 +149,7 @@ export type Database = {
           open_price?: number | null
           total_fees?: number | null
           total_trades?: number | null
-          user_id?: string
+          user_id?: string | null
           winning_trades?: number | null
         }
         Relationships: []
@@ -168,7 +168,7 @@ export type Database = {
           passphrase_encrypted: string | null
           spot_enabled: boolean | null
           updated_at: string | null
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           api_key_encrypted?: string | null
@@ -183,7 +183,7 @@ export type Database = {
           passphrase_encrypted?: string | null
           spot_enabled?: boolean | null
           updated_at?: string | null
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           api_key_encrypted?: string | null
@@ -198,7 +198,7 @@ export type Database = {
           passphrase_encrypted?: string | null
           spot_enabled?: boolean | null
           updated_at?: string | null
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -211,7 +211,7 @@ export type Database = {
           title: string
           trade_id: string | null
           type: Database["public"]["Enums"]["notification_type"]
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           created_at?: string | null
@@ -221,7 +221,7 @@ export type Database = {
           title: string
           trade_id?: string | null
           type: Database["public"]["Enums"]["notification_type"]
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           created_at?: string | null
@@ -231,7 +231,7 @@ export type Database = {
           title?: string
           trade_id?: string | null
           type?: Database["public"]["Enums"]["notification_type"]
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -262,7 +262,7 @@ export type Database = {
           trade_type: Database["public"]["Enums"]["trade_type"]
           unrealized_pnl: number | null
           updated_at: string | null
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           current_price?: number | null
@@ -282,7 +282,7 @@ export type Database = {
           trade_type: Database["public"]["Enums"]["trade_type"]
           unrealized_pnl?: number | null
           updated_at?: string | null
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           current_price?: number | null
@@ -302,7 +302,7 @@ export type Database = {
           trade_type?: Database["public"]["Enums"]["trade_type"]
           unrealized_pnl?: number | null
           updated_at?: string | null
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -329,7 +329,7 @@ export type Database = {
           id: string
           is_completed: boolean | null
           updated_at: string | null
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           created_at?: string | null
@@ -338,7 +338,7 @@ export type Database = {
           id?: string
           is_completed?: boolean | null
           updated_at?: string | null
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           created_at?: string | null
@@ -347,7 +347,7 @@ export type Database = {
           id?: string
           is_completed?: boolean | null
           updated_at?: string | null
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -375,7 +375,7 @@ export type Database = {
           status: Database["public"]["Enums"]["position_status"] | null
           symbol: string
           trade_type: Database["public"]["Enums"]["trade_type"]
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           ai_reasoning?: string | null
@@ -400,7 +400,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["position_status"] | null
           symbol: string
           trade_type: Database["public"]["Enums"]["trade_type"]
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           ai_reasoning?: string | null
@@ -425,7 +425,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["position_status"] | null
           symbol?: string
           trade_type?: Database["public"]["Enums"]["trade_type"]
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {

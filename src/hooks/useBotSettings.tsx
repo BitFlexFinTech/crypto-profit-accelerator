@@ -1,29 +1,24 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from './useAuth';
 import { BotSettings } from '@/types/trading';
 import { useToast } from '@/hooks/use-toast';
 
+const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
+
 export function useBotSettings() {
-  const { user } = useAuth();
   const { toast } = useToast();
   const [settings, setSettings] = useState<BotSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user) {
-      fetchSettings();
-    }
-  }, [user]);
+    fetchSettings();
+  }, []);
 
   const fetchSettings = async () => {
-    if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('bot_settings')
         .select('*')
-        .eq('user_id', user.id)
         .maybeSingle();
 
       if (error) throw error;
@@ -38,7 +33,6 @@ export function useBotSettings() {
           daily_loss_limit: Number(data.daily_loss_limit),
         } as BotSettings);
       } else {
-        // Create default settings
         await createDefaultSettings();
       }
     } catch (error) {
@@ -54,13 +48,11 @@ export function useBotSettings() {
   };
 
   const createDefaultSettings = async () => {
-    if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('bot_settings')
         .insert({
-          user_id: user.id,
+          user_id: DEFAULT_USER_ID,
           is_paper_trading: true,
           is_bot_running: false,
           min_order_size: 333.00,
@@ -90,7 +82,7 @@ export function useBotSettings() {
   };
 
   const updateSettings = async (updates: Partial<BotSettings>) => {
-    if (!user || !settings) return;
+    if (!settings) return;
 
     try {
       const { error } = await supabase

@@ -2,6 +2,9 @@ import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsPanel } from '@/components/dashboard/PositionsPanel';
 import { PnLCharts } from '@/components/dashboard/PnLCharts';
 import { BotControls } from '@/components/dashboard/BotControls';
+import { LiveSignals } from '@/components/dashboard/LiveSignals';
+import { ConnectionStatus } from '@/components/dashboard/ConnectionStatus';
+import { EngineStatus } from '@/components/dashboard/EngineStatus';
 
 export default function DashboardPage() {
   return (
@@ -9,7 +12,10 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground">Monitor your trading bot performance</p>
+          <div className="flex items-center gap-2 mt-1">
+            <EngineStatus />
+            <ConnectionStatus />
+          </div>
         </div>
         <BotControls />
       </div>
@@ -18,8 +24,10 @@ export default function DashboardPage() {
       
       <div className="grid gap-6 lg:grid-cols-2">
         <PositionsPanel />
-        <PnLCharts />
+        <LiveSignals />
       </div>
+
+      <PnLCharts />
     </div>
   );
 }
