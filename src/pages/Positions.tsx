@@ -1,16 +1,15 @@
-import { usePositions } from '@/hooks/usePositions';
-import { useExchanges } from '@/hooks/useExchanges';
+import { useTrading } from '@/contexts/TradingContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { X, TrendingUp, TrendingDown, AlertTriangle, Clock } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { X, TrendingUp, TrendingDown, AlertTriangle, Clock, Target } from 'lucide-react';
 import { EXCHANGE_CONFIGS } from '@/types/trading';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function PositionsPage() {
-  const { positions, loading, closePosition, closeAllPositions, getTotalUnrealizedPnl } = usePositions();
-  const { exchanges } = useExchanges();
+  const { positions, loading, closePosition, closeAllPositions, exchanges, prices } = useTrading();
 
   const getExchangeName = (exchangeId?: string) => {
     if (!exchangeId) return 'Unknown';
@@ -28,8 +27,29 @@ export default function PositionsPage() {
     return config?.logo || '❓';
   };
 
-  const totalPnl = getTotalUnrealizedPnl();
+  const totalPnl = positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
   const totalSize = positions.reduce((sum, p) => sum + p.order_size_usd, 0);
+
+  // Calculate ETA to profit target
+  const getETA = (position: typeof positions[0]) => {
+    if (!position.opened_at) return null;
+    const elapsedMs = Date.now() - new Date(position.opened_at).getTime();
+    const elapsedSec = elapsedMs / 1000;
+    
+    if (elapsedSec < 15 || position.unrealized_pnl <= 0) return null;
+    
+    const pnlRatePerSec = position.unrealized_pnl / elapsedSec;
+    if (pnlRatePerSec <= 0) return null;
+    
+    const remainingPnl = position.profit_target - position.unrealized_pnl;
+    if (remainingPnl <= 0) return 'Target hit!';
+    
+    const remainingSec = remainingPnl / pnlRatePerSec;
+    
+    if (remainingSec < 60) return `~${Math.ceil(remainingSec)}s`;
+    if (remainingSec < 3600) return `~${Math.ceil(remainingSec / 60)}m`;
+    return `~${Math.ceil(remainingSec / 3600)}h`;
+  };
 
   if (loading) {
     return (
@@ -101,7 +121,9 @@ export default function PositionsPage() {
                 const pnlPercent = position.entry_price > 0 
                   ? ((position.unrealized_pnl / position.order_size_usd) * 100)
                   : 0;
-                const targetProgress = (position.unrealized_pnl / position.profit_target) * 100;
+                const targetProgress = Math.min(100, Math.max(0, (position.unrealized_pnl / position.profit_target) * 100));
+                const currentPrice = prices[position.symbol] || position.current_price;
+                const eta = getETA(position);
                 
                 return (
                   <div 
@@ -144,7 +166,7 @@ export default function PositionsPage() {
                             </div>
                             <div>
                               <p className="text-muted-foreground">Current Price</p>
-                              <p className="font-mono text-foreground">${position.current_price?.toFixed(4) || '-'}</p>
+                              <p className="font-mono text-foreground font-medium">${currentPrice?.toFixed(4) || '-'}</p>
                             </div>
                             <div>
                               <p className="text-muted-foreground">Position Size</p>
@@ -152,13 +174,36 @@ export default function PositionsPage() {
                             </div>
                           </div>
 
+                          {/* Progress bar */}
+                          <div className="mt-3 space-y-1">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <div className="flex items-center gap-1">
+                                <Target className="h-3 w-3" />
+                                <span>Target: ${position.profit_target.toFixed(2)}</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className={targetProgress >= 100 ? 'text-primary font-medium' : ''}>
+                                  Progress: {targetProgress.toFixed(0)}%
+                                </span>
+                                {eta && (
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    ETA: {eta}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <Progress 
+                              value={targetProgress} 
+                              className={`h-2 ${targetProgress >= 100 ? '[&>div]:bg-primary' : targetProgress > 50 ? '[&>div]:bg-chart-2' : '[&>div]:bg-chart-3'}`}
+                            />
+                          </div>
+
                           <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <Clock className="h-3 w-3" />
-                              Opened {formatDistanceToNow(new Date(position.opened_at))} ago
+                              Opened {position.opened_at ? formatDistanceToNow(new Date(position.opened_at)) : '-'} ago
                             </span>
-                            <span>Target: ${position.profit_target.toFixed(2)}</span>
-                            <span>Progress: {Math.min(100, Math.max(0, targetProgress)).toFixed(0)}%</span>
                           </div>
                         </div>
                       </div>

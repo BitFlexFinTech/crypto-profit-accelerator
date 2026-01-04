@@ -115,6 +115,7 @@ const TRADING_LOOP_INTERVAL = 3000;
 const PROFIT_CHECK_INTERVAL = 1000;
 const WATCHDOG_INTERVAL = 5000;
 const MAX_EXECUTION_LOGS = 200;
+const MAX_NEW_TRADES_PER_CYCLE = 2; // Execute up to 2 distinct signals per loop cycle
 
 // LOWERED THRESHOLDS for more trading
 const THRESHOLDS = {
@@ -167,7 +168,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const isRunningRef = useRef(false);
   const lastProfitCheckRef = useRef<number>(0);
   const lastTradingLoopTickRef = useRef<number>(0);
-  const lastExecutedSignalRef = useRef<{ key: string; at: number } | null>(null);
+  // Per-signal cooldown map to allow trading multiple pairs
+  const lastExecutedMapRef = useRef<Record<string, number>>({});
+  // Track which symbols we're currently subscribed to
+  const subscribedSymbolsRef = useRef<Set<string>>(new Set());
   
   // Stable refs for latest state
   const settingsRef = useRef<BotSettings | null>(null);
@@ -261,10 +265,21 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Build dynamic symbols list (includes position symbols + signal symbols)
+  const getDynamicSymbols = useCallback(() => {
+    const symbolSet = new Set(DEFAULT_SYMBOLS);
+    // Add all open position symbols
+    positionsRef.current.forEach(p => symbolSet.add(p.symbol));
+    // Add top signal symbols (up to 10)
+    signalsRef.current.slice(0, 10).forEach(s => symbolSet.add(s.symbol));
+    return Array.from(symbolSet);
+  }, []);
+
   // REST API fallback for fetching prices
   const fetchPricesViaREST = useCallback(async () => {
     try {
-      const priceData = await fetchAllPrices(DEFAULT_SYMBOLS);
+      const dynamicSymbols = getDynamicSymbols();
+      const priceData = await fetchAllPrices(dynamicSymbols);
       
       if (priceData.length > 0) {
         const newPrices: Record<string, number> = {};
@@ -302,7 +317,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('REST fallback error:', error);
     }
-  }, []);
+  }, [getDynamicSymbols]);
 
   // Start REST fallback polling
   const startRestFallback = useCallback(() => {
@@ -338,9 +353,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       return newState;
     });
 
-    const connectWs = () => {
+    const connectWs = (symbolsToSubscribe?: string[]) => {
       let ws: WebSocket;
-      const symbols = DEFAULT_SYMBOLS;
+      const symbols = symbolsToSubscribe || getDynamicSymbols();
+      subscribedSymbolsRef.current = new Set(symbols);
       
       try {
         if (exchangeName === 'binance') {
@@ -717,11 +733,9 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         executionTime: execTime,
       }));
 
-      // Record last executed signal to prevent rapid duplicates
-      lastExecutedSignalRef.current = {
-        key: `${signal.exchange}:${signal.symbol}:${signal.direction}`,
-        at: Date.now(),
-      };
+      // Record in cooldown map (per-signal tracking)
+      const signalKey = `${signal.exchange}:${signal.symbol}:${signal.direction}`;
+      lastExecutedMapRef.current[signalKey] = Date.now();
 
       return true;
     } catch (err) {
@@ -735,7 +749,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [appendExecutionLog]);
 
-  // Trading loop (uses refs for stability)
+  // Trading loop (uses refs for stability) - NOW TRADES MULTIPLE PAIRS
   const runTradingLoop = useCallback(async () => {
     if (!isRunningRef.current) return;
     const currentSettings = settingsRef.current;
@@ -749,12 +763,24 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       const currentSignals = signalsRef.current;
       const currentExchanges = exchangesRef.current;
       const maxPositions = currentSettings.max_open_positions || 10;
+      const availableSlots = maxPositions - currentPositions.length;
 
       // Check if we're at max positions
-      if (currentPositions.length >= maxPositions) {
+      if (availableSlots <= 0) {
         appendExecutionLog({
           type: 'LOOP_TICK',
           message: `Monitoring ${currentPositions.length} positions (max: ${maxPositions})`,
+        });
+        setEngineStatus('monitoring');
+        return;
+      }
+
+      // Check exchange connection
+      const hasConnectedExchange = currentExchanges.some(e => e.is_connected);
+      if (!hasConnectedExchange) {
+        appendExecutionLog({
+          type: 'BLOCKED',
+          message: 'No exchanges connected',
         });
         setEngineStatus('monitoring');
         return;
@@ -764,60 +790,79 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       const thresholdKey = (currentSettings.ai_aggressiveness || 'balanced') as keyof typeof THRESHOLDS;
       const { confidence: confidenceThreshold, score: scoreThreshold } = THRESHOLDS[thresholdKey] || THRESHOLDS.balanced;
 
+      // Build set of symbols already in position (to avoid duplicates)
+      const positionSymbols = new Set(currentPositions.map(p => p.symbol));
+
+      // Execute MULTIPLE signals per cycle (up to available slots and MAX_NEW_TRADES_PER_CYCLE)
+      const maxTradesToExecute = Math.min(availableSlots, MAX_NEW_TRADES_PER_CYCLE);
+      let tradesExecutedThisCycle = 0;
+
       if (currentSignals.length > 0) {
-        const topSignal = currentSignals[0];
-        
-        console.log(`📊 Top signal: ${topSignal.symbol} | Score: ${topSignal.score} (need ${scoreThreshold}) | Confidence: ${(topSignal.confidence * 100).toFixed(1)}% (need ${(confidenceThreshold * 100).toFixed(1)}%)`);
-        
-        // Check thresholds
-        if (topSignal.confidence < confidenceThreshold) {
-          appendExecutionLog({
-            type: 'BLOCKED',
-            message: `Confidence ${(topSignal.confidence * 100).toFixed(0)}% < ${(confidenceThreshold * 100).toFixed(0)}% threshold`,
-            symbol: topSignal.symbol,
-          });
-          setEngineStatus('monitoring');
-          return;
+        for (const signal of currentSignals) {
+          if (tradesExecutedThisCycle >= maxTradesToExecute) break;
+
+          // Skip if we already have a position on this symbol
+          if (positionSymbols.has(signal.symbol)) {
+            appendExecutionLog({
+              type: 'BLOCKED',
+              message: `Already have open position`,
+              symbol: signal.symbol,
+            });
+            continue;
+          }
+
+          // Check thresholds
+          if (signal.confidence < confidenceThreshold) {
+            appendExecutionLog({
+              type: 'BLOCKED',
+              message: `Confidence ${(signal.confidence * 100).toFixed(0)}% < ${(confidenceThreshold * 100).toFixed(0)}%`,
+              symbol: signal.symbol,
+            });
+            continue;
+          }
+
+          if (signal.score < scoreThreshold) {
+            appendExecutionLog({
+              type: 'BLOCKED',
+              message: `Score ${signal.score} < ${scoreThreshold}`,
+              symbol: signal.symbol,
+            });
+            continue;
+          }
+
+          // Check per-signal cooldown (prevent same signal within 15 seconds)
+          const signalKey = `${signal.exchange}:${signal.symbol}:${signal.direction}`;
+          const lastExecTime = lastExecutedMapRef.current[signalKey];
+          if (lastExecTime && Date.now() - lastExecTime < 15000) {
+            appendExecutionLog({
+              type: 'BLOCKED',
+              message: `Cooldown: executed ${Math.floor((Date.now() - lastExecTime) / 1000)}s ago`,
+              symbol: signal.symbol,
+            });
+            continue;
+          }
+
+          // Execute the trade
+          setEngineStatus('trading');
+          const success = await executeTradeFromSignal(signal);
+          if (success) {
+            tradesExecutedThisCycle++;
+            positionSymbols.add(signal.symbol); // Prevent duplicate in same cycle
+            lastExecutedMapRef.current[signalKey] = Date.now();
+          }
         }
 
-        if (topSignal.score < scoreThreshold) {
+        if (tradesExecutedThisCycle > 0) {
           appendExecutionLog({
-            type: 'BLOCKED',
-            message: `Score ${topSignal.score} < ${scoreThreshold} threshold`,
-            symbol: topSignal.symbol,
+            type: 'LOOP_TICK',
+            message: `Executed ${tradesExecutedThisCycle} trade(s) this cycle`,
           });
-          setEngineStatus('monitoring');
-          return;
-        }
-
-        // Check cooldown (prevent same signal within 15 seconds)
-        const signalKey = `${topSignal.exchange}:${topSignal.symbol}:${topSignal.direction}`;
-        const lastExec = lastExecutedSignalRef.current;
-        if (lastExec && lastExec.key === signalKey && Date.now() - lastExec.at < 15000) {
+        } else {
           appendExecutionLog({
-            type: 'BLOCKED',
-            message: `Cooldown: Same signal executed ${Math.floor((Date.now() - lastExec.at) / 1000)}s ago`,
-            symbol: topSignal.symbol,
+            type: 'LOOP_TICK',
+            message: `Evaluated ${currentSignals.length} signals, none passed filters`,
           });
-          setEngineStatus('monitoring');
-          return;
         }
-
-        // Check exchange connection
-        const hasConnectedExchange = currentExchanges.some(e => e.is_connected);
-        if (!hasConnectedExchange) {
-          appendExecutionLog({
-            type: 'BLOCKED',
-            message: 'No exchanges connected',
-            symbol: topSignal.symbol,
-          });
-          setEngineStatus('monitoring');
-          return;
-        }
-
-        // Execute the trade
-        setEngineStatus('trading');
-        await executeTradeFromSignal(topSignal);
       } else {
         appendExecutionLog({
           type: 'LOOP_TICK',
