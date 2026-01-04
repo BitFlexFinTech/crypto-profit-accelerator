@@ -605,7 +605,24 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [isScanning, engineStatus, appendExecutionLog]);
 
-  // Fast profit target checking
+  // Calculate net PnL including ALL fees (same formula as edge function)
+  const calculateNetPnL = useCallback((position: Position, currentPrice: number): number => {
+    const feeRate = position.trade_type === 'spot' ? 0.001 : 0.0005;
+    const entryFee = position.order_size_usd * feeRate;
+    const exitFee = position.order_size_usd * feeRate;
+    const fundingFee = position.trade_type === 'futures' ? position.order_size_usd * 0.0001 : 0;
+    
+    let grossPnL: number;
+    if (position.direction === 'long') {
+      grossPnL = (currentPrice - position.entry_price) * position.quantity * (position.leverage || 1);
+    } else {
+      grossPnL = (position.entry_price - currentPrice) * position.quantity * (position.leverage || 1);
+    }
+    
+    return grossPnL - entryFee - exitFee - fundingFee;
+  }, []);
+
+  // Fast profit target checking - NOW WITH FEE-INCLUSIVE CALCULATION
   const checkProfitTargets = useCallback(async () => {
     if (!isRunningRef.current) return;
     const currentSettings = settingsRef.current;
@@ -620,21 +637,37 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         ? currentSettings.futures_profit_target
         : currentSettings.spot_profit_target;
 
-      if (position.unrealized_pnl >= profitTarget) {
-        console.log(`🎯 Position ${position.symbol} hit $${profitTarget} profit target! Closing NOW...`);
+      // Use current price from WebSocket for more accurate calculation
+      const currentPrice = prices[position.symbol] || position.current_price || position.entry_price;
+      
+      // Calculate NET PnL including ALL fees (entry, exit, funding)
+      const netPnL = calculateNetPnL(position, currentPrice);
+      
+      // Add 5% safety buffer to ensure we don't close at a loss due to slippage
+      const targetWithBuffer = profitTarget * 1.05;
+
+      if (netPnL >= targetWithBuffer) {
+        console.log(`🎯 Position ${position.symbol} hit NET profit target $${netPnL.toFixed(2)} >= $${targetWithBuffer.toFixed(2)}! Closing NOW...`);
         setEngineStatus('trading');
         
         try {
+          // Pass the exit price and require profit validation
           await invokeWithRetry(() => 
-            supabase.functions.invoke('close-position', { body: { positionId: position.id } })
+            supabase.functions.invoke('close-position', { 
+              body: { 
+                positionId: position.id,
+                exitPrice: currentPrice,
+                requireProfit: true, // CRITICAL: Only close if profitable
+              } 
+            })
           );
           setPositions(prev => prev.filter(p => p.id !== position.id));
           appendExecutionLog({
             type: 'TRADE_SUCCESS',
-            message: `Position closed at profit target +$${profitTarget}`,
+            message: `Position closed at NET profit +$${netPnL.toFixed(2)} (target: +$${profitTarget})`,
             symbol: position.symbol,
           });
-          console.log(`✅ Position ${position.symbol} closed successfully`);
+          console.log(`✅ Position ${position.symbol} closed successfully with NET profit +$${netPnL.toFixed(2)}`);
         } catch (err) {
           console.error(`Failed to close position ${position.id}:`, err);
           appendExecutionLog({
@@ -645,7 +678,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         }
       }
     }
-  }, [appendExecutionLog]);
+  }, [appendExecutionLog, calculateNetPnL, prices]);
 
   // Core trade execution logic (extracted for reuse)
   const executeTradeFromSignal = useCallback(async (signal: TradingSignal, isTestTrade = false): Promise<boolean> => {

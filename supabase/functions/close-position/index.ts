@@ -16,11 +16,11 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { positionId, exitPrice: requestedExitPrice } = await req.json();
+    const { positionId, exitPrice: requestedExitPrice, requireProfit = false } = await req.json();
     
-    console.log("Closing position:", positionId);
+    console.log("Closing position:", positionId, "requireProfit:", requireProfit);
 
-    // Atomically update position to 'closing' to prevent race conditions
+    // Atomically update position to 'closed' to prevent race conditions
     const { data: position, error: claimError } = await supabase
       .from("positions")
       .update({ status: "closed" as const })
@@ -41,16 +41,10 @@ serve(async (req) => {
       });
     }
 
-    // Use requested exit price or current price
-    let exitPrice = requestedExitPrice || position.current_price || position.entry_price;
-    
-    // Simulate slight slippage (0.01-0.03%)
-    const slippage = (Math.random() * 0.0002 + 0.0001);
-    if (position.direction === "long") {
-      exitPrice *= (1 - slippage);
-    } else {
-      exitPrice *= (1 + slippage);
-    }
+    // Use requested exit price if provided (for automated closes), otherwise use current price
+    // For automated closes with requireProfit=true, we use the exact price from frontend
+    // to ensure the profit calculation matches what triggered the close
+    const exitPrice = requestedExitPrice || position.current_price || position.entry_price;
 
     // Calculate fees
     const feeRate = position.trade_type === "spot" ? 0.001 : 0.0005;
@@ -75,6 +69,26 @@ serve(async (req) => {
 
     const fundingFee = position.trade_type === "futures" ? position.order_size_usd * 0.0001 : 0;
     const netProfit = grossProfit - entryFee - exitFee - fundingFee;
+
+    // CRITICAL: If requireProfit is true, verify the position is profitable before closing
+    if (requireProfit && netProfit < 0) {
+      // Revert the position back to 'open' since we can't close at a loss
+      await supabase
+        .from("positions")
+        .update({ status: "open" })
+        .eq("id", positionId);
+      
+      console.log("Rejected close - netProfit:", netProfit.toFixed(2), "is negative (requireProfit=true)");
+      return new Response(JSON.stringify({
+        success: false,
+        error: "Position would close at a loss",
+        netProfit: netProfit,
+        message: "Automated close rejected: profit target not met after fees",
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Update trade record
     const { error: updateTradeError } = await supabase
