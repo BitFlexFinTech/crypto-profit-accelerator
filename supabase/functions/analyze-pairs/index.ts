@@ -39,13 +39,213 @@ interface HistoricalPerformance {
   tradeCount: number;
 }
 
+interface TechnicalIndicators {
+  rsi: number;
+  macdHistogram: number;
+  bbPosition: number; // 0-1, where 0 = at lower band, 1 = at upper band
+  rsiSignal: "oversold" | "overbought" | "neutral";
+  macdSignal: "bullish" | "bearish" | "neutral";
+  bbSignal: "buy" | "sell" | "neutral";
+}
+
 // TOP 10 high-liquidity pairs by market cap - PRIORITIZE THESE for fastest trades
 const TOP_10_PAIRS = [
   'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT',
   'BNB/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 'DOT/USDT'
 ];
 
-// Fetch historical performance from trades table
+// ========== TECHNICAL INDICATORS ==========
+
+// Calculate RSI (Relative Strength Index)
+function calculateRSI(prices: number[], period: number = 14): number {
+  if (prices.length < period + 1) return 50; // Default to neutral
+  
+  const gains: number[] = [];
+  const losses: number[] = [];
+  
+  for (let i = 1; i < prices.length; i++) {
+    const change = prices[i] - prices[i - 1];
+    gains.push(change > 0 ? change : 0);
+    losses.push(change < 0 ? Math.abs(change) : 0);
+  }
+  
+  if (gains.length < period) return 50;
+  
+  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  
+  // Calculate subsequent values with smoothing
+  for (let i = period; i < gains.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+  }
+  
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
+// Calculate EMA (Exponential Moving Average)
+function calculateEMA(prices: number[], period: number): number[] {
+  if (prices.length < period) return [];
+  
+  const multiplier = 2 / (period + 1);
+  const ema: number[] = [];
+  
+  // Start with SMA
+  const sma = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  ema.push(sma);
+  
+  // Calculate EMA
+  for (let i = period; i < prices.length; i++) {
+    const newEma = (prices[i] - ema[ema.length - 1]) * multiplier + ema[ema.length - 1];
+    ema.push(newEma);
+  }
+  
+  return ema;
+}
+
+// Calculate MACD
+function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
+  const fastPeriod = 12;
+  const slowPeriod = 26;
+  const signalPeriod = 9;
+  
+  if (prices.length < slowPeriod + signalPeriod) {
+    return { macd: 0, signal: 0, histogram: 0 };
+  }
+  
+  const fastEMA = calculateEMA(prices, fastPeriod);
+  const slowEMA = calculateEMA(prices, slowPeriod);
+  
+  if (fastEMA.length === 0 || slowEMA.length === 0) {
+    return { macd: 0, signal: 0, histogram: 0 };
+  }
+  
+  // Calculate MACD line
+  const offset = slowPeriod - fastPeriod;
+  const macdLine: number[] = [];
+  for (let i = 0; i < slowEMA.length; i++) {
+    if (fastEMA[i + offset] !== undefined) {
+      macdLine.push(fastEMA[i + offset] - slowEMA[i]);
+    }
+  }
+  
+  if (macdLine.length < signalPeriod) {
+    return { macd: 0, signal: 0, histogram: 0 };
+  }
+  
+  // Calculate signal line
+  const signalLine = calculateEMA(macdLine, signalPeriod);
+  
+  if (signalLine.length === 0) {
+    return { macd: 0, signal: 0, histogram: 0 };
+  }
+  
+  const lastMacd = macdLine[macdLine.length - 1];
+  const lastSignal = signalLine[signalLine.length - 1];
+  
+  return {
+    macd: lastMacd,
+    signal: lastSignal,
+    histogram: lastMacd - lastSignal,
+  };
+}
+
+// Calculate Bollinger Bands
+function calculateBollingerBands(prices: number[], period: number = 20, stdDev: number = 2): { upper: number; middle: number; lower: number; position: number } {
+  if (prices.length < period) {
+    const price = prices[prices.length - 1] || 0;
+    return { upper: price, middle: price, lower: price, position: 0.5 };
+  }
+  
+  const recentPrices = prices.slice(-period);
+  const middle = recentPrices.reduce((a, b) => a + b, 0) / period;
+  
+  // Calculate standard deviation
+  const squaredDiffs = recentPrices.map(p => Math.pow(p - middle, 2));
+  const variance = squaredDiffs.reduce((a, b) => a + b, 0) / period;
+  const std = Math.sqrt(variance);
+  
+  const upper = middle + stdDev * std;
+  const lower = middle - stdDev * std;
+  const currentPrice = prices[prices.length - 1];
+  
+  // Position: 0 = at lower band, 1 = at upper band
+  const position = upper !== lower ? (currentPrice - lower) / (upper - lower) : 0.5;
+  
+  return { upper, middle, lower, position: Math.max(0, Math.min(1, position)) };
+}
+
+// Fetch kline/candlestick data for technical analysis
+async function fetchKlineData(symbol: string, exchange: string): Promise<number[]> {
+  try {
+    const binanceSymbol = symbol.replace('/', '');
+    
+    // Fetch 1-minute candles (last 50)
+    const response = await fetch(
+      `https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=1m&limit=50`
+    );
+    
+    if (!response.ok) {
+      console.log(`Failed to fetch klines for ${symbol}: ${response.status}`);
+      return [];
+    }
+    
+    const data = await response.json();
+    // Extract close prices
+    return data.map((candle: any[]) => parseFloat(candle[4]));
+  } catch (error) {
+    console.log(`Error fetching klines for ${symbol}:`, error);
+    return [];
+  }
+}
+
+// Calculate all technical indicators for a symbol
+async function calculateTechnicalIndicators(symbol: string, exchange: string, currentPrice: number): Promise<TechnicalIndicators> {
+  const prices = await fetchKlineData(symbol, exchange);
+  
+  if (prices.length < 20) {
+    // Not enough data, return neutral indicators
+    return {
+      rsi: 50,
+      macdHistogram: 0,
+      bbPosition: 0.5,
+      rsiSignal: "neutral",
+      macdSignal: "neutral",
+      bbSignal: "neutral",
+    };
+  }
+  
+  const rsi = calculateRSI(prices);
+  const macd = calculateMACD(prices);
+  const bb = calculateBollingerBands(prices);
+  
+  // Determine signals
+  let rsiSignal: "oversold" | "overbought" | "neutral" = "neutral";
+  if (rsi < 30) rsiSignal = "oversold";
+  else if (rsi > 70) rsiSignal = "overbought";
+  
+  let macdSignal: "bullish" | "bearish" | "neutral" = "neutral";
+  if (macd.histogram > 0 && macd.macd > macd.signal) macdSignal = "bullish";
+  else if (macd.histogram < 0 && macd.macd < macd.signal) macdSignal = "bearish";
+  
+  let bbSignal: "buy" | "sell" | "neutral" = "neutral";
+  if (bb.position < 0.2) bbSignal = "buy"; // Near lower band
+  else if (bb.position > 0.8) bbSignal = "sell"; // Near upper band
+  
+  return {
+    rsi,
+    macdHistogram: macd.histogram,
+    bbPosition: bb.position,
+    rsiSignal,
+    macdSignal,
+    bbSignal,
+  };
+}
+
+// ========== DATA FETCHING ==========
+
 async function fetchHistoricalPerformance(supabaseClient: any): Promise<Record<string, HistoricalPerformance>> {
   try {
     const { data: trades, error } = await supabaseClient
@@ -98,25 +298,20 @@ async function fetchHistoricalPerformance(supabaseClient: any): Promise<Record<s
   }
 }
 
-// Fetch market data from exchange public APIs - FILTER TO TOP 10 ONLY
 async function fetchBinanceData(): Promise<MarketData[]> {
   try {
     const response = await fetch("https://api.binance.com/api/v3/ticker/24hr");
     if (!response.ok) throw new Error("Binance API error");
     const data = await response.json();
     
-    // Convert TOP_10_PAIRS to Binance format for filtering
     const top10Binance = TOP_10_PAIRS.map(s => s.replace('/USDT', 'USDT'));
     
     return data
-      .filter((t: any) => {
-        // STRICT: Only TOP 10 pairs with high volume
-        return top10Binance.includes(t.symbol) && parseFloat(t.quoteVolume) > 10000000;
-      })
+      .filter((t: any) => top10Binance.includes(t.symbol) && parseFloat(t.quoteVolume) > 10000000)
       .map((t: any) => ({
         symbol: t.symbol.replace("USDT", "/USDT"),
         price: parseFloat(t.lastPrice),
-        priceChange1h: parseFloat(t.priceChangePercent) / 24, // Approximation
+        priceChange1h: parseFloat(t.priceChangePercent) / 24,
         priceChange24h: parseFloat(t.priceChangePercent),
         volume24h: parseFloat(t.quoteVolume),
         high24h: parseFloat(t.highPrice),
@@ -134,14 +329,10 @@ async function fetchOKXData(): Promise<MarketData[]> {
     if (!response.ok) throw new Error("OKX API error");
     const data = await response.json();
     
-    // Convert TOP_10_PAIRS to OKX format
     const top10OKX = TOP_10_PAIRS.map(s => s.replace('/', '-'));
     
     return data.data
-      .filter((t: any) => {
-        // STRICT: Only TOP 10 pairs with high volume
-        return top10OKX.includes(t.instId) && parseFloat(t.volCcy24h) > 10000000;
-      })
+      .filter((t: any) => top10OKX.includes(t.instId) && parseFloat(t.volCcy24h) > 10000000)
       .map((t: any) => ({
         symbol: t.instId.replace("-", "/"),
         price: parseFloat(t.last),
@@ -163,14 +354,10 @@ async function fetchBybitData(): Promise<MarketData[]> {
     if (!response.ok) throw new Error("Bybit API error");
     const data = await response.json();
     
-    // Convert TOP_10_PAIRS to Bybit format
     const top10Bybit = TOP_10_PAIRS.map(s => s.replace('/USDT', 'USDT'));
     
     return data.result.list
-      .filter((t: any) => {
-        // STRICT: Only TOP 10 pairs with high volume
-        return top10Bybit.includes(t.symbol) && parseFloat(t.turnover24h) > 10000000;
-      })
+      .filter((t: any) => top10Bybit.includes(t.symbol) && parseFloat(t.turnover24h) > 10000000)
       .map((t: any) => ({
         symbol: t.symbol.replace("USDT", "/USDT"),
         price: parseFloat(t.lastPrice),
@@ -192,14 +379,10 @@ async function fetchKucoinData(): Promise<MarketData[]> {
     if (!response.ok) throw new Error("KuCoin API error");
     const data = await response.json();
     
-    // Convert TOP_10_PAIRS to KuCoin format
     const top10Kucoin = TOP_10_PAIRS.map(s => s.replace('/', '-'));
     
     return data.data.ticker
-      .filter((t: any) => {
-        // STRICT: Only TOP 10 pairs with high volume
-        return top10Kucoin.includes(t.symbol) && parseFloat(t.volValue) > 10000000;
-      })
+      .filter((t: any) => top10Kucoin.includes(t.symbol) && parseFloat(t.volValue) > 10000000)
       .map((t: any) => ({
         symbol: t.symbol.replace("-", "/"),
         price: parseFloat(t.last),
@@ -215,7 +398,8 @@ async function fetchKucoinData(): Promise<MarketData[]> {
   }
 }
 
-// Calculate technical indicators
+// ========== SCORING ==========
+
 function calculateVolatility(high: number, low: number, price: number): "low" | "medium" | "high" {
   const atr = ((high - low) / price) * 100;
   if (atr < 2) return "low";
@@ -230,11 +414,11 @@ function calculateMomentum(change1h: number, change24h: number): "bearish" | "ne
   return "neutral";
 }
 
-// Calculate score with historical performance boost for fast trades
 function calculateScore(
   data: MarketData, 
   aggressiveness: string, 
-  historicalPerf?: HistoricalPerformance
+  historicalPerf?: HistoricalPerformance,
+  technicals?: TechnicalIndicators
 ): number {
   const volatilityScore = calculateVolatility(data.high24h, data.low24h, data.price) === "high" ? 30 : 
                           calculateVolatility(data.high24h, data.low24h, data.price) === "medium" ? 20 : 10;
@@ -244,28 +428,45 @@ function calculateScore(
   
   let baseScore = volatilityScore + momentumScore + volumeScore;
   
-  // HISTORICAL PERFORMANCE BOOST: Favor pairs that close fast and profitably
-  if (historicalPerf && historicalPerf.tradeCount >= 3) {
-    // Speed bonus: pairs that close under 5 minutes get boost
-    if (historicalPerf.avgDurationSec < 300) {
-      baseScore += 20; // Fast closer bonus
-    } else if (historicalPerf.avgDurationSec < 600) {
-      baseScore += 10; // Medium speed bonus
-    } else if (historicalPerf.avgDurationSec > 1200) {
-      baseScore -= 15; // Penalty for slow closers
+  // TECHNICAL INDICATOR BOOST
+  if (technicals) {
+    // RSI scoring
+    if (technicals.rsiSignal === "oversold") {
+      baseScore += 15; // Strong long signal
+    } else if (technicals.rsiSignal === "overbought") {
+      baseScore += 15; // Strong short signal
     }
     
-    // Win rate bonus
+    // MACD scoring
+    if (technicals.macdSignal === "bullish" || technicals.macdSignal === "bearish") {
+      baseScore += 10; // Clear trend
+    }
+    
+    // Bollinger Bands scoring
+    if (technicals.bbSignal === "buy" || technicals.bbSignal === "sell") {
+      baseScore += 8; // Price at extremes
+    }
+  }
+  
+  // HISTORICAL PERFORMANCE BOOST
+  if (historicalPerf && historicalPerf.tradeCount >= 3) {
+    if (historicalPerf.avgDurationSec < 300) {
+      baseScore += 20;
+    } else if (historicalPerf.avgDurationSec < 600) {
+      baseScore += 10;
+    } else if (historicalPerf.avgDurationSec > 1200) {
+      baseScore -= 15;
+    }
+    
     if (historicalPerf.winRate >= 0.7) {
       baseScore += 15;
     } else if (historicalPerf.winRate >= 0.5) {
       baseScore += 5;
     } else if (historicalPerf.winRate < 0.3) {
-      baseScore -= 20; // Heavy penalty for low win rate
+      baseScore -= 20;
     }
   }
   
-  // Adjust based on aggressiveness
   if (aggressiveness === "aggressive") {
     baseScore *= 1.2;
   } else if (aggressiveness === "conservative") {
@@ -275,6 +476,46 @@ function calculateScore(
   return Math.min(Math.round(baseScore), 100);
 }
 
+// Determine direction based on technical indicators
+function determineDirectionFromTechnicals(
+  data: MarketData,
+  technicals?: TechnicalIndicators
+): "long" | "short" {
+  let longSignals = 0;
+  let shortSignals = 0;
+  
+  // Price position in range
+  const range = data.high24h - data.low24h;
+  const positionInRange = range > 0 ? (data.price - data.low24h) / range : 0.5;
+  
+  // 1h momentum
+  if (data.priceChange1h < -0.3) shortSignals += 2;
+  else if (data.priceChange1h > 0.3) longSignals += 2;
+  
+  // Position in daily range
+  if (positionInRange > 0.7) shortSignals += 1;
+  else if (positionInRange < 0.3) longSignals += 1;
+  
+  // Technical indicators (if available)
+  if (technicals) {
+    // RSI
+    if (technicals.rsiSignal === "oversold") longSignals += 2;
+    else if (technicals.rsiSignal === "overbought") shortSignals += 2;
+    
+    // MACD
+    if (technicals.macdSignal === "bullish") longSignals += 2;
+    else if (technicals.macdSignal === "bearish") shortSignals += 2;
+    
+    // Bollinger Bands
+    if (technicals.bbSignal === "buy") longSignals += 1;
+    else if (technicals.bbSignal === "sell") shortSignals += 1;
+  }
+  
+  return longSignals >= shortSignals ? "long" : "short";
+}
+
+// ========== MAIN HANDLER ==========
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -283,14 +524,12 @@ serve(async (req) => {
   try {
     const { exchanges, mode, aggressiveness } = await req.json();
     
-    console.log("Analyzing TOP 10 pairs for exchanges:", exchanges, "mode:", mode, "aggressiveness:", aggressiveness);
+    console.log("Analyzing TOP 10 pairs with RSI/MACD/BB for exchanges:", exchanges, "mode:", mode);
 
-    // Initialize Supabase client for historical performance lookup
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseClient = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch historical performance data in parallel with market data
     const historicalPerfPromise = fetchHistoricalPerformance(supabaseClient);
 
     // Fetch market data from enabled exchanges
@@ -327,24 +566,45 @@ serve(async (req) => {
       );
     }
     
-    // Wait for both market data and historical performance
     await Promise.all(fetchPromises);
     const historicalPerf = await historicalPerfPromise;
     
     console.log("Fetched market data from", allMarketData.length, "exchanges");
-    console.log("Historical performance data for", Object.keys(historicalPerf).length, "symbols");
 
-    // Prepare data for AI analysis with historical performance scoring
+    // Fetch technical indicators for top pairs (in parallel)
+    const uniqueSymbols = new Set<string>();
+    allMarketData.forEach(({ data }) => data.forEach(d => uniqueSymbols.add(d.symbol)));
+    
+    const technicalPromises = Array.from(uniqueSymbols).slice(0, 10).map(async (symbol) => {
+      const marketInfo = allMarketData.flatMap(e => e.data).find(d => d.symbol === symbol);
+      const exchange = allMarketData.find(e => e.data.some(d => d.symbol === symbol))?.exchange || "binance";
+      const technicals = await calculateTechnicalIndicators(symbol, exchange, marketInfo?.price || 0);
+      return { symbol, technicals };
+    });
+    
+    const technicalResults = await Promise.all(technicalPromises);
+    const technicalMap = new Map(technicalResults.map(t => [t.symbol, t.technicals]));
+    
+    console.log("Calculated technical indicators for", technicalMap.size, "symbols");
+
+    // Prepare data for AI analysis with technical indicators
     const marketSummary = allMarketData.flatMap(({ exchange, data }) =>
       data.map(d => {
         const perf = historicalPerf[d.symbol];
+        const technicals = technicalMap.get(d.symbol);
         return {
           exchange,
           ...d,
           volatility: calculateVolatility(d.high24h, d.low24h, d.price),
           momentum: calculateMomentum(d.priceChange1h, d.priceChange24h),
-          score: calculateScore(d, aggressiveness, perf),
-          // Include historical metrics for AI context
+          score: calculateScore(d, aggressiveness, perf, technicals),
+          // Technical indicators for AI context
+          rsi: technicals?.rsi.toFixed(1),
+          macdSignal: technicals?.macdSignal,
+          bbPosition: technicals?.bbPosition.toFixed(2),
+          rsiSignal: technicals?.rsiSignal,
+          bbSignal: technicals?.bbSignal,
+          // Historical metrics
           historicalWinRate: perf?.winRate,
           historicalAvgDuration: perf?.avgDurationSec,
           historicalTradeCount: perf?.tradeCount,
@@ -352,80 +612,54 @@ serve(async (req) => {
       })
     );
 
-    // Sort by score and get top candidates (prioritizing fast closers)
     marketSummary.sort((a, b) => b.score - a.score);
-    const topCandidates = marketSummary.slice(0, 10); // TOP 10 only
+    const topCandidates = marketSummary.slice(0, 10);
 
-    // Use Lovable AI for intelligent analysis
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    const aiPrompt = `You are an expert HIGH-FREQUENCY crypto trading analyst. Your ONLY goal is to select pairs that will hit profit targets in the SHORTEST time possible (ideally under 5 minutes).
+    const aiPrompt = `You are an expert HIGH-FREQUENCY crypto trading analyst using RSI, MACD, and Bollinger Bands.
 
 CRITICAL REQUIREMENTS:
-- ONLY select from TOP 10 high-liquidity pairs (BTC, ETH, SOL, XRP, DOGE, BNB, ADA, AVAX, LINK, DOT)
-- Pairs with faster historical close times should be PRIORITIZED
-- Pairs with low win rates (<30%) should be AVOIDED
-- Target: UNDER 5 MINUTES to hit $1 (spot) or $3 (futures) profit
+- ONLY select from TOP 10 high-liquidity pairs
+- Use RSI, MACD, and Bollinger Bands to determine direction
+- Target: UNDER 5 MINUTES to hit profit target
 
-🚨 CRITICAL DIRECTION RULES - YOU MUST FOLLOW THESE:
-1. You MUST return a MIX of LONG and SHORT signals - aim for at least 40% in each direction
-2. If priceChange1h is NEGATIVE, strongly consider SHORT positions
-3. If priceChange1h is POSITIVE, strongly consider LONG positions
-4. If price is near high24h (top 30% of range), favor SHORT
-5. If price is near low24h (bottom 30% of range), favor LONG
-6. NEVER default to all longs - analyze each pair independently
-7. Return AT LEAST 2 SHORT signals if ANY bearish momentum detected
+🚨 DIRECTION RULES - TECHNICAL ANALYSIS BASED:
+1. RSI < 30 (oversold) = STRONG LONG signal
+2. RSI > 70 (overbought) = STRONG SHORT signal
+3. MACD bullish crossover = LONG signal
+4. MACD bearish crossover = SHORT signal
+5. Price at lower Bollinger Band (bbPosition < 0.2) = LONG
+6. Price at upper Bollinger Band (bbPosition > 0.8) = SHORT
+7. You MUST return a MIX of LONG and SHORT based on indicators
 
-Market Data (sorted by opportunity score, includes historical performance):
+Market Data with Technical Indicators:
 ${JSON.stringify(topCandidates, null, 2)}
 
-Direction Analysis Helper:
+Direction Analysis with Technicals:
 ${topCandidates.slice(0, 5).map(c => {
-  const range = c.high24h - c.low24h;
-  const positionInRange = range > 0 ? ((c.price - c.low24h) / range) * 100 : 50;
-  const suggestedDir = c.priceChange1h < -0.3 ? 'SHORT' : c.priceChange1h > 0.3 ? 'LONG' : (positionInRange > 70 ? 'SHORT' : positionInRange < 30 ? 'LONG' : 'NEUTRAL');
-  return `${c.symbol}: 1h change ${c.priceChange1h.toFixed(2)}%, position in range ${positionInRange.toFixed(0)}% → Suggested: ${suggestedDir}`;
+  const techDir = c.rsiSignal === 'oversold' ? 'LONG' : c.rsiSignal === 'overbought' ? 'SHORT' : 
+                  c.macdSignal === 'bullish' ? 'LONG' : c.macdSignal === 'bearish' ? 'SHORT' : 
+                  c.bbSignal === 'buy' ? 'LONG' : c.bbSignal === 'sell' ? 'SHORT' : 'NEUTRAL';
+  return `${c.symbol}: RSI=${c.rsi} (${c.rsiSignal}), MACD=${c.macdSignal}, BB=${c.bbPosition} (${c.bbSignal}) → ${techDir}`;
 }).join('\n')}
 
-Historical Performance Key:
-- historicalWinRate: Past win rate (higher = better)
-- historicalAvgDuration: Average seconds to close (LOWER = BETTER, prioritize under 300s)
-- historicalTradeCount: Number of past trades (more data = more reliable)
-
 Trading Parameters:
-- Mode: ${mode} (spot = $1 profit target, futures = $3 profit target STRICTLY)
+- Mode: ${mode} (spot = $1 profit, futures = $3 profit)
 - Aggressiveness: ${aggressiveness}
-- Order size: $333-$450 per trade
-- STRICT RULE: Futures trades MUST target $3 profit after all fees
 
-For the top 5 FASTEST opportunities, provide:
-1. Direction (long/short) - CAREFULLY analyze momentum. SHORT when bearish, LONG when bullish
-2. Confidence level (0-1) - higher for pairs with good historical performance
-3. Estimated time to reach profit target (be aggressive, aim for <5 min)
-4. Brief reasoning focusing on WHY this pair will hit target quickly
-
-AVOID pairs with:
-- historicalWinRate < 0.3
-- historicalAvgDuration > 1200 (20 minutes)
-
-Respond ONLY with a JSON array (MUST include both long AND short signals):
+For top 5 opportunities, provide direction based on technical indicators.
+Respond ONLY with JSON array:
 [
   {
     "symbol": "BTC/USDT",
     "direction": "long",
     "confidence": 0.85,
     "timeToProfit": "2-3 min",
-    "reasoning": "Bullish momentum +0.8% 1h, near daily low, historical avg close time 180s"
-  },
-  {
-    "symbol": "ETH/USDT",
-    "direction": "short",
-    "confidence": 0.80,
-    "timeToProfit": "2-4 min",
-    "reasoning": "Bearish momentum -0.5% 1h, near daily high, good for quick short scalp"
+    "reasoning": "RSI 28 oversold, MACD bullish, at lower BB - strong buy"
   }
 ]`;
 
@@ -438,7 +672,7 @@ Respond ONLY with a JSON array (MUST include both long AND short signals):
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You are a crypto trading analyst. Respond only with valid JSON arrays." },
+          { role: "system", content: "You are a crypto trading analyst using RSI, MACD, Bollinger Bands. Respond only with valid JSON arrays." },
           { role: "user", content: aiPrompt }
         ],
       }),
@@ -446,24 +680,10 @@ Respond ONLY with a JSON array (MUST include both long AND short signals):
 
     if (!aiResponse.ok) {
       console.error("AI API error:", await aiResponse.text());
-      // Fall back to algorithmic analysis with PROPER direction detection
+      // Fallback to algorithmic with technical indicators
       const signals: TradingSignal[] = topCandidates.slice(0, 5).map(candidate => {
-        // Calculate direction based on momentum AND price position in range
-        const range = candidate.high24h - candidate.low24h;
-        const positionInRange = range > 0 ? (candidate.price - candidate.low24h) / range : 0.5;
-        
-        let direction: "long" | "short";
-        if (candidate.priceChange1h < -0.3) {
-          direction = "short"; // Bearish momentum = short
-        } else if (candidate.priceChange1h > 0.3) {
-          direction = "long"; // Bullish momentum = long
-        } else if (positionInRange > 0.7) {
-          direction = "short"; // Near high = short
-        } else if (positionInRange < 0.3) {
-          direction = "long"; // Near low = long
-        } else {
-          direction = candidate.momentum === "bearish" ? "short" : "long";
-        }
+        const technicals = technicalMap.get(candidate.symbol);
+        const direction = determineDirectionFromTechnicals(candidate, technicals);
         
         return {
           exchange: candidate.exchange,
@@ -476,7 +696,7 @@ Respond ONLY with a JSON array (MUST include both long AND short signals):
           estimatedTimeToProfit: candidate.volatility === "high" ? "1-3 min" : candidate.volatility === "medium" ? "3-8 min" : "8-15 min",
           entryPrice: candidate.price,
           targetPrice: candidate.price * (direction === "long" ? 1.001 : 0.999),
-          reasoning: `${direction.toUpperCase()} - ${candidate.momentum} momentum, ${(positionInRange * 100).toFixed(0)}% in daily range, 1h: ${candidate.priceChange1h > 0 ? '+' : ''}${candidate.priceChange1h.toFixed(2)}%`,
+          reasoning: `${direction.toUpperCase()} - RSI ${technicals?.rsi.toFixed(0) || 50} (${technicals?.rsiSignal || 'neutral'}), MACD ${technicals?.macdSignal || 'neutral'}, BB ${((technicals?.bbPosition || 0.5) * 100).toFixed(0)}%`,
           tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
         };
       });
@@ -485,7 +705,7 @@ Respond ONLY with a JSON array (MUST include both long AND short signals):
         signals,
         analyzedAt: new Date().toISOString(),
         nextAnalysisIn: 30,
-        source: "algorithmic",
+        source: "algorithmic-with-technicals",
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -496,7 +716,6 @@ Respond ONLY with a JSON array (MUST include both long AND short signals):
     
     let aiSignals: any[] = [];
     try {
-      // Extract JSON from the response
       const jsonMatch = aiContent.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         aiSignals = JSON.parse(jsonMatch[0]);
@@ -505,30 +724,14 @@ Respond ONLY with a JSON array (MUST include both long AND short signals):
       console.error("Failed to parse AI response:", e);
     }
 
-    // Merge AI insights with market data
+    // Merge AI insights with market data and technicals
     const signals: TradingSignal[] = aiSignals.slice(0, 5).map((aiSignal: any, index: number) => {
       const marketInfo = topCandidates.find(c => c.symbol === aiSignal.symbol) || topCandidates[index];
+      const technicals = technicalMap.get(marketInfo?.symbol || aiSignal.symbol);
       
-      // Validate and default direction based on market data if AI didn't provide one
       let direction: "long" | "short" = aiSignal.direction;
       if (!direction || (direction !== "long" && direction !== "short")) {
-        // Use momentum-based fallback
-        if (marketInfo) {
-          const range = marketInfo.high24h - marketInfo.low24h;
-          const positionInRange = range > 0 ? (marketInfo.price - marketInfo.low24h) / range : 0.5;
-          
-          if (marketInfo.priceChange1h < -0.3) {
-            direction = "short";
-          } else if (marketInfo.priceChange1h > 0.3) {
-            direction = "long";
-          } else if (positionInRange > 0.7) {
-            direction = "short";
-          } else {
-            direction = "long";
-          }
-        } else {
-          direction = "long";
-        }
+        direction = determineDirectionFromTechnicals(marketInfo, technicals);
       }
       
       return {
@@ -542,29 +745,15 @@ Respond ONLY with a JSON array (MUST include both long AND short signals):
         estimatedTimeToProfit: aiSignal.timeToProfit || "5-10 min",
         entryPrice: marketInfo?.price || 0,
         targetPrice: marketInfo?.price ? marketInfo.price * (direction === "long" ? 1.001 : 0.999) : 0,
-        reasoning: aiSignal.reasoning || "AI-generated signal",
+        reasoning: aiSignal.reasoning || `RSI ${technicals?.rsi.toFixed(0) || 50}, MACD ${technicals?.macdSignal || 'neutral'}`,
         tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
       };
     });
 
-    // If no AI signals, use algorithmic with proper direction detection
     if (signals.length === 0) {
       const fallbackSignals: TradingSignal[] = topCandidates.slice(0, 5).map(candidate => {
-        const range = candidate.high24h - candidate.low24h;
-        const positionInRange = range > 0 ? (candidate.price - candidate.low24h) / range : 0.5;
-        
-        let direction: "long" | "short";
-        if (candidate.priceChange1h < -0.3) {
-          direction = "short";
-        } else if (candidate.priceChange1h > 0.3) {
-          direction = "long";
-        } else if (positionInRange > 0.7) {
-          direction = "short";
-        } else if (positionInRange < 0.3) {
-          direction = "long";
-        } else {
-          direction = candidate.momentum === "bearish" ? "short" : "long";
-        }
+        const technicals = technicalMap.get(candidate.symbol);
+        const direction = determineDirectionFromTechnicals(candidate, technicals);
         
         return {
           exchange: candidate.exchange,
@@ -577,7 +766,7 @@ Respond ONLY with a JSON array (MUST include both long AND short signals):
           estimatedTimeToProfit: candidate.volatility === "high" ? "1-3 min" : "5-10 min",
           entryPrice: candidate.price,
           targetPrice: candidate.price * (direction === "long" ? 1.001 : 0.999),
-          reasoning: `${direction.toUpperCase()} - ${candidate.momentum} momentum with ${candidate.volatility} volatility`,
+          reasoning: `${direction.toUpperCase()} based on RSI/MACD/BB analysis`,
           tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
         };
       });
@@ -586,19 +775,19 @@ Respond ONLY with a JSON array (MUST include both long AND short signals):
         signals: fallbackSignals,
         analyzedAt: new Date().toISOString(),
         nextAnalysisIn: 30,
-        source: "algorithmic",
+        source: "algorithmic-with-technicals",
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    console.log("Generated", signals.length, "trading signals");
+    console.log("Generated", signals.length, "trading signals with technical analysis");
 
     return new Response(JSON.stringify({
       signals,
       analyzedAt: new Date().toISOString(),
       nextAnalysisIn: 30,
-      source: "ai",
+      source: "ai-with-technicals",
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

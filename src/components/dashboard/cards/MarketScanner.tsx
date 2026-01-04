@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { useTrading } from '@/contexts/TradingContext';
 import { cn } from '@/lib/utils';
+import { LiveBadge } from '@/components/ui/live-badge';
 
 interface MarketItem {
   symbol: string;
@@ -24,7 +25,6 @@ export function MarketScanner() {
       const prevPrice = prevPricesRef.current[symbol] || price;
       const priceDirection: 'up' | 'down' | 'neutral' = price > prevPrice ? 'up' : price < prevPrice ? 'down' : 'neutral';
       
-      // Use real data from WebSocket
       const change24h = data?.change24h || 0;
       const volume24h = data?.volume24h || 0;
       const volatility = data?.volatility || 0;
@@ -39,11 +39,9 @@ export function MarketScanner() {
       };
     });
     
-    // Sort by volatility/change (most volatile first)
     newMarkets.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
-    setMarkets(newMarkets.slice(0, 8));
+    setMarkets(newMarkets.slice(0, 6));
     
-    // Store current prices for next comparison
     prevPricesRef.current = { ...prices };
   }, [prices, marketData]);
 
@@ -57,45 +55,36 @@ export function MarketScanner() {
   };
 
   return (
-    <Card className="bg-card border-border overflow-hidden">
-      <CardHeader className="pb-2">
+    <Card className="overflow-hidden flex flex-col h-[200px]">
+      <CardHeader className="py-2 px-3 flex-shrink-0">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <Activity className="h-4 w-4 text-primary" />
             Market Scanner
           </CardTitle>
-          <div className="flex items-center gap-2">
-            <span className={cn(
-              "h-2 w-2 rounded-full",
-              isConnected ? "bg-primary animate-pulse" : "bg-destructive"
-            )} />
-            <span className="text-xs text-muted-foreground">
-              {isConnected ? 'Live' : 'Disconnected'}
-            </span>
-          </div>
+          <LiveBadge isLive={isConnected} />
         </div>
       </CardHeader>
-      <CardContent className="p-0">
-        <div className="divide-y divide-border max-h-[300px] overflow-y-auto scrollbar-thin">
+      <CardContent className="p-0 flex-1 overflow-hidden">
+        <div className="divide-y divide-border overflow-y-auto h-full scrollbar-thin">
           {markets.length === 0 ? (
-            <div className="p-4 text-center text-muted-foreground text-sm">
-              {isConnected ? 'Loading market data...' : 'Connect exchanges to see market data'}
+            <div className="p-4 text-center text-muted-foreground text-xs">
+              {isConnected ? 'Loading...' : 'Connect exchanges'}
             </div>
           ) : (
             markets.map((market, i) => (
               <div
                 key={market.symbol}
                 className={cn(
-                  "flex items-center justify-between p-3 transition-all duration-300",
+                  "flex items-center justify-between px-3 py-2 transition-all duration-300",
                   "hover:bg-secondary/50",
                   market.priceDirection === 'up' && "bg-primary/5",
                   market.priceDirection === 'down' && "bg-destructive/5"
                 )}
-                style={{ animationDelay: `${i * 50}ms` }}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <div className={cn(
-                    "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors duration-300",
+                    "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold",
                     market.volatility === 'high' ? 'bg-destructive/20 text-destructive' :
                     market.volatility === 'medium' ? 'bg-warning/20 text-warning' :
                     'bg-primary/20 text-primary'
@@ -103,15 +92,15 @@ export function MarketScanner() {
                     {market.symbol.split('/')[0].slice(0, 3)}
                   </div>
                   <div>
-                    <p className="font-medium text-sm">{market.symbol}</p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="font-medium text-xs">{market.symbol}</p>
+                    <p className="text-[10px] text-muted-foreground">
                       Vol: {formatVolume(market.volume)}
                     </p>
                   </div>
                 </div>
                 <div className="text-right">
                   <p className={cn(
-                    "font-mono text-sm font-medium transition-colors duration-300",
+                    "font-mono text-xs font-medium tabular-nums",
                     market.priceDirection === 'up' ? "text-primary" : 
                     market.priceDirection === 'down' ? "text-destructive" : 
                     "text-foreground"
@@ -123,12 +112,12 @@ export function MarketScanner() {
                   </p>
                   <div className="flex items-center justify-end gap-1">
                     {market.change >= 0 ? (
-                      <TrendingUp className="h-3 w-3 text-primary" />
+                      <TrendingUp className="h-2.5 w-2.5 text-primary" />
                     ) : (
-                      <TrendingDown className="h-3 w-3 text-destructive" />
+                      <TrendingDown className="h-2.5 w-2.5 text-destructive" />
                     )}
                     <span className={cn(
-                      "text-xs font-medium",
+                      "text-[10px] font-medium tabular-nums",
                       market.change >= 0 ? "text-primary" : "text-destructive"
                     )}>
                       {market.change >= 0 ? '+' : ''}{market.change.toFixed(2)}%

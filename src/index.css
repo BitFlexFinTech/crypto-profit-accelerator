@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* HFT Trading Bot Design System - Dark theme with green accent */
+/* HFT Trading Bot Design System - Dark theme with cyan/green gradients */
 
 @layer base {
   :root {
@@ -48,52 +48,64 @@
   }
 
   .dark {
-    --background: 220 20% 6%;
+    --background: 222 47% 6%;
     --foreground: 210 40% 98%;
 
-    --card: 220 20% 10%;
+    --card: 222 47% 8%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 220 20% 10%;
+    --popover: 222 47% 8%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 142 76% 45%;
+    --primary: 160 84% 45%;
     --primary-foreground: 0 0% 0%;
 
-    --secondary: 220 20% 14%;
+    --secondary: 222 47% 12%;
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 220 20% 14%;
+    --muted: 222 47% 14%;
     --muted-foreground: 220 10% 60%;
 
-    --accent: 142 76% 45%;
+    --accent: 180 70% 50%;
     --accent-foreground: 0 0% 0%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 142 76% 45%;
+    --success: 160 84% 45%;
     --success-foreground: 0 0% 0%;
 
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 0%;
 
-    --border: 220 20% 18%;
-    --input: 220 20% 18%;
-    --ring: 142 76% 45%;
+    --border: 222 47% 16%;
+    --input: 222 47% 16%;
+    --ring: 160 84% 45%;
 
-    --chart-profit: 142 76% 45%;
+    --chart-profit: 160 84% 45%;
     --chart-loss: 0 72% 51%;
     --chart-neutral: 220 10% 60%;
 
-    --sidebar-background: 220 20% 8%;
+    --sidebar-background: 222 47% 5%;
     --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 142 76% 45%;
+    --sidebar-primary: 160 84% 45%;
     --sidebar-primary-foreground: 0 0% 0%;
-    --sidebar-accent: 220 20% 14%;
+    --sidebar-accent: 222 47% 12%;
     --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 220 20% 18%;
-    --sidebar-ring: 142 76% 45%;
+    --sidebar-border: 222 47% 14%;
+    --sidebar-ring: 160 84% 45%;
+
+    /* Gradient accent colors */
+    --gradient-from: 160 84% 45%;
+    --gradient-to: 180 70% 50%;
+    --gradient-accent: 280 70% 55%;
+
+    /* Chart colors */
+    --chart-1: 160 84% 45%;
+    --chart-2: 180 70% 50%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 280 70% 55%;
+    --chart-5: 0 72% 51%;
   }
 }
 
@@ -115,8 +127,8 @@
   }
 
   .scrollbar-thin::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 4px;
+    height: 4px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-track {
@@ -125,7 +137,11 @@
 
   .scrollbar-thin::-webkit-scrollbar-thumb {
     background-color: hsl(var(--muted));
-    border-radius: 3px;
+    border-radius: 2px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground));
   }
 
   .glow-success {
@@ -134,5 +150,92 @@
 
   .glow-destructive {
     box-shadow: 0 0 20px hsl(var(--destructive) / 0.3);
+  }
+
+  .glow-primary {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.25);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px hsl(var(--accent) / 0.25);
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Gradient border */
+  .gradient-border {
+    position: relative;
+    border: 1px solid transparent;
+    background: linear-gradient(hsl(var(--card)), hsl(var(--card))) padding-box,
+                linear-gradient(135deg, hsl(var(--primary) / 0.5), hsl(var(--accent) / 0.5)) border-box;
+  }
+
+  /* Live indicator pulse */
+  .live-pulse {
+    animation: livePulse 2s ease-in-out infinite;
+  }
+
+  @keyframes livePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* Dashboard fixed layout */
+  .dashboard-grid {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .dashboard-content {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: auto auto 1fr auto;
+    gap: 0.75rem;
+    overflow: hidden;
+    padding: 0.75rem;
+  }
+
+  /* Card with internal scroll */
+  .card-scrollable {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .card-scrollable-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  /* Animation */
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out forwards;
+  }
+
+  /* Compact card */
+  .compact-card {
+    @apply bg-card border border-border rounded-lg overflow-hidden;
+  }
+
+  .compact-card-header {
+    @apply px-3 py-2 border-b border-border flex items-center justify-between;
+  }
+
+  .compact-card-content {
+    @apply p-3;
   }
 }

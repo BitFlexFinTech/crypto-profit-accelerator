@@ -106,8 +106,8 @@ export function MainLayout({ children }: MainLayoutProps) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="container mx-auto px-6 py-6">
+      <main className="flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-hidden">
           {children}
         </div>
       </main>

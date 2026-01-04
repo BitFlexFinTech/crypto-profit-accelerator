@@ -13,7 +13,6 @@ interface VolatilityItem {
 export function VolatilityScanner() {
   const { marketData } = useTrading();
 
-  // Get volatility items from REAL market data only - NO MOCK DATA
   const items: VolatilityItem[] = Object.values(marketData)
     .filter(data => data && data.symbol && data.volatility !== undefined)
     .map(data => {
@@ -23,13 +22,13 @@ export function VolatilityScanner() {
       
       return {
         symbol: data.symbol,
-        volatility: Math.min(data.volatility * 10, 100), // Scale volatility percentage
+        volatility: Math.min(data.volatility * 10, 100),
         trend,
         change24h: data.change24h,
       };
     })
     .sort((a, b) => b.volatility - a.volatility)
-    .slice(0, 6);
+    .slice(0, 5);
 
   const getVolatilityColor = (vol: number) => {
     if (vol >= 70) return 'text-destructive bg-destructive/20';
@@ -44,46 +43,40 @@ export function VolatilityScanner() {
   };
 
   return (
-    <Card className="bg-card border-border overflow-hidden">
-      <CardHeader className="pb-2">
+    <Card className="h-[200px] overflow-hidden flex flex-col">
+      <CardHeader className="py-2 px-3 flex-shrink-0">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <Flame className="h-4 w-4 text-primary" />
-            Volatility Scanner
+            Volatility
           </CardTitle>
           {items.length > 0 && (
-            <Activity className="h-4 w-4 text-muted-foreground animate-pulse" />
+            <Activity className="h-3 w-3 text-muted-foreground animate-pulse" />
           )}
         </div>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="p-3 pt-0 flex-1 overflow-y-auto scrollbar-thin space-y-1.5">
         {items.length === 0 ? (
-          <div className="p-4 text-center text-muted-foreground text-sm">
-            <p>Waiting for real-time data...</p>
-            <p className="text-xs mt-1">Connect exchanges to see volatility</p>
+          <div className="p-3 text-center text-muted-foreground text-xs">
+            Waiting for data...
           </div>
         ) : (
           items.map((item, i) => (
             <div
               key={item.symbol}
-              className={cn(
-                "flex items-center gap-3 p-2 rounded-lg transition-all duration-300",
-                "hover:bg-secondary/50 animate-fade-in"
-              )}
-              style={{ animationDelay: `${i * 75}ms` }}
+              className="flex items-center gap-2 p-1.5 rounded bg-secondary/30"
             >
-              {/* Volatility Bar */}
               <div className="flex-1">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-medium">{item.symbol}</span>
+                  <span className="text-[10px] font-medium">{item.symbol}</span>
                   <span className={cn(
-                    "text-xs font-bold px-1.5 py-0.5 rounded",
+                    "text-[9px] font-bold px-1 py-0.5 rounded",
                     getVolatilityColor(item.volatility)
                   )}>
                     {getVolatilityLabel(item.volatility)}
                   </span>
                 </div>
-                <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                   <div
                     className={cn(
                       "h-full rounded-full transition-all duration-700",
@@ -95,16 +88,13 @@ export function VolatilityScanner() {
                 </div>
               </div>
               
-              {/* Trend Indicator */}
-              <div className="flex items-center gap-2">
-                <div className={cn(
-                  "w-6 h-6 rounded flex items-center justify-center text-xs font-bold",
-                  item.trend === 'up' ? 'bg-primary/20 text-primary' :
-                  item.trend === 'down' ? 'bg-destructive/20 text-destructive' :
-                  'bg-secondary text-muted-foreground'
-                )}>
-                  {item.trend === 'up' ? '↑' : item.trend === 'down' ? '↓' : '→'}
-                </div>
+              <div className={cn(
+                "w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold",
+                item.trend === 'up' ? 'bg-primary/20 text-primary' :
+                item.trend === 'down' ? 'bg-destructive/20 text-destructive' :
+                'bg-secondary text-muted-foreground'
+              )}>
+                {item.trend === 'up' ? '↑' : item.trend === 'down' ? '↓' : '→'}
               </div>
             </div>
           ))

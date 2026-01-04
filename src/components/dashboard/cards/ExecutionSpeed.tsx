@@ -17,7 +17,6 @@ export function ExecutionSpeed() {
   const [avgLatency, setAvgLatency] = useState(0);
 
   useEffect(() => {
-    // Calculate average latency from connection states
     const latencies = Object.values(connectionStates)
       .filter(s => s.connected)
       .map(s => s.latency);
@@ -56,15 +55,15 @@ export function ExecutionSpeed() {
   const speedPercentage = (overallScore / Math.max(metrics.length, 1)) * 100;
 
   return (
-    <Card className="bg-card border-border overflow-hidden">
-      <CardHeader className="pb-2">
+    <Card className="h-[200px] overflow-hidden">
+      <CardHeader className="py-2 px-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <Zap className="h-4 w-4 text-primary" />
             Execution Speed
           </CardTitle>
           <div className={cn(
-            "flex items-center gap-1 text-xs font-medium",
+            "flex items-center gap-1 text-[10px] font-medium",
             speedPercentage >= 75 ? "text-primary" : speedPercentage >= 50 ? "text-warning" : "text-destructive"
           )}>
             <Gauge className="h-3 w-3" />
@@ -72,14 +71,14 @@ export function ExecutionSpeed() {
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Speed Gauge */}
-        <div className="relative h-24 flex items-center justify-center">
-          <div className="relative w-32 h-16 overflow-hidden">
-            <div className="absolute inset-0 border-8 border-b-0 border-secondary rounded-t-full" />
+      <CardContent className="p-3 pt-0 space-y-3">
+        {/* Speed Gauge - Compact */}
+        <div className="flex items-center justify-center">
+          <div className="relative w-20 h-10 overflow-hidden">
+            <div className="absolute inset-0 border-4 border-b-0 border-secondary rounded-t-full" />
             <div
               className={cn(
-                "absolute inset-0 border-8 border-b-0 rounded-t-full transition-all duration-700",
+                "absolute inset-0 border-4 border-b-0 rounded-t-full transition-all duration-700",
                 speedPercentage >= 75 ? "border-primary" : speedPercentage >= 50 ? "border-warning" : "border-destructive"
               )}
               style={{
@@ -88,7 +87,7 @@ export function ExecutionSpeed() {
             />
             <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center">
               <p className={cn(
-                "text-2xl font-bold",
+                "text-base font-bold tabular-nums",
                 speedPercentage >= 75 ? "text-primary" : speedPercentage >= 50 ? "text-warning" : "text-destructive"
               )}>
                 {isEngineRunning ? (avgLatency > 0 ? `${avgLatency.toFixed(0)}ms` : '--') : 'OFF'}
@@ -98,26 +97,22 @@ export function ExecutionSpeed() {
         </div>
 
         {/* Metrics Grid */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-1.5">
           {metrics.map((metric, i) => (
             <div
               key={metric.label}
-              className={cn(
-                "p-2 rounded-lg bg-secondary/50 transition-all duration-300",
-                "hover:bg-secondary"
-              )}
-              style={{ animationDelay: `${i * 100}ms` }}
+              className="p-1.5 rounded bg-secondary/50"
             >
-              <p className="text-xs text-muted-foreground">{metric.label}</p>
-              <div className="flex items-baseline gap-1">
+              <p className="text-[10px] text-muted-foreground">{metric.label}</p>
+              <div className="flex items-baseline gap-0.5">
                 <span className={cn(
-                  "font-mono text-lg font-bold",
+                  "font-mono text-sm font-bold tabular-nums",
                   metric.status === 'fast' ? 'text-primary' :
                   metric.status === 'normal' ? 'text-warning' : 'text-destructive'
                 )}>
                   {metric.value > 0 ? metric.value.toFixed(0) : '--'}
                 </span>
-                <span className="text-xs text-muted-foreground">{metric.unit}</span>
+                <span className="text-[10px] text-muted-foreground">{metric.unit}</span>
               </div>
             </div>
           ))}

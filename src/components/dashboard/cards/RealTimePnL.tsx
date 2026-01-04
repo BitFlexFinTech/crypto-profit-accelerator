@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { TrendingUp, TrendingDown, Activity, Trophy, Target, Clock } from 'lucide-react';
 import { useTrades } from '@/hooks/useTrades';
 import { cn } from '@/lib/utils';
+import { LiveBadge } from '@/components/ui/live-badge';
 
 export function RealTimePnL() {
   const { trades, loading } = useTrades();
@@ -11,7 +12,6 @@ export function RealTimePnL() {
   const [prevPnL, setPrevPnL] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
 
-  // Calculate today's stats from trades
   const todayStats = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
     const todayTrades = trades.filter(t => {
@@ -27,14 +27,6 @@ export function RealTimePnL() {
     
     const profits = todayTrades.map(t => t.net_profit || 0);
     const bestTrade = profits.length > 0 ? Math.max(...profits) : 0;
-    const worstTrade = profits.length > 0 ? Math.min(...profits) : 0;
-
-    // Calculate hourly breakdown
-    const hourlyPnL: { [hour: number]: number } = {};
-    todayTrades.forEach(t => {
-      const hour = new Date(t.closed_at || t.opened_at || '').getHours();
-      hourlyPnL[hour] = (hourlyPnL[hour] || 0) + (t.net_profit || 0);
-    });
 
     return {
       totalPnL,
@@ -44,12 +36,9 @@ export function RealTimePnL() {
       winRate,
       avgProfit,
       bestTrade,
-      worstTrade,
-      hourlyPnL,
     };
   }, [trades]);
 
-  // Animate P&L changes
   useEffect(() => {
     if (todayStats.totalPnL !== prevPnL) {
       setIsAnimating(true);
@@ -74,14 +63,11 @@ export function RealTimePnL() {
   }, [todayStats.totalPnL, prevPnL, animatedPnL]);
 
   const isProfit = animatedPnL >= 0;
-  const maxHourlyPnL = Math.max(...Object.values(todayStats.hourlyPnL), 1);
-  const minHourlyPnL = Math.min(...Object.values(todayStats.hourlyPnL), 0);
-  const hourlyRange = Math.max(Math.abs(maxHourlyPnL), Math.abs(minHourlyPnL), 1);
 
   if (loading) {
     return (
-      <Card className="col-span-full lg:col-span-2">
-        <CardContent className="flex items-center justify-center h-48">
+      <Card className="col-span-2 h-[200px]">
+        <CardContent className="flex items-center justify-center h-full">
           <Activity className="h-6 w-6 animate-spin text-muted-foreground" />
         </CardContent>
       </Card>
@@ -89,146 +75,79 @@ export function RealTimePnL() {
   }
 
   return (
-    <Card className="col-span-full lg:col-span-2 overflow-hidden">
-      <CardHeader className="pb-2">
+    <Card className="col-span-2 overflow-hidden">
+      <CardHeader className="py-2 px-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Activity className="h-5 w-5 text-primary" />
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Activity className="h-4 w-4 text-primary" />
             Today's P&L
           </CardTitle>
-          <Badge variant="outline" className="bg-primary/10 text-primary animate-pulse">
-            <span className="w-2 h-2 bg-primary rounded-full mr-1.5" />
-            Live
-          </Badge>
+          <LiveBadge />
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="p-3 pt-0 space-y-3">
         {/* Main P&L Display */}
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <div className={cn(
-              "text-4xl font-bold transition-all duration-300",
-              isProfit ? "text-green-500" : "text-red-500",
+              "text-2xl font-bold transition-all duration-300 tabular-nums",
+              isProfit ? "text-primary" : "text-destructive",
               isAnimating && "scale-105"
             )}>
               {isProfit ? '+' : ''}{animatedPnL.toFixed(2)} USDT
             </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {isProfit ? (
-                <TrendingUp className="h-4 w-4 text-green-500" />
+                <TrendingUp className="h-3 w-3 text-primary" />
               ) : (
-                <TrendingDown className="h-4 w-4 text-red-500" />
+                <TrendingDown className="h-3 w-3 text-destructive" />
               )}
-              {todayStats.tradeCount} trades completed today
+              {todayStats.tradeCount} trades today
             </div>
           </div>
           
           {/* Win Rate Circle */}
-          <div className="relative w-20 h-20">
-            <svg className="w-20 h-20 transform -rotate-90">
-              <circle
-                cx="40"
-                cy="40"
-                r="35"
-                stroke="currentColor"
-                strokeWidth="6"
-                fill="none"
-                className="text-muted"
-              />
-              <circle
-                cx="40"
-                cy="40"
-                r="35"
-                stroke="currentColor"
-                strokeWidth="6"
-                fill="none"
-                strokeDasharray={`${todayStats.winRate * 2.2} 220`}
-                className="text-green-500 transition-all duration-500"
+          <div className="relative w-14 h-14">
+            <svg className="w-14 h-14 transform -rotate-90">
+              <circle cx="28" cy="28" r="24" stroke="currentColor" strokeWidth="4" fill="none" className="text-muted" />
+              <circle cx="28" cy="28" r="24" stroke="currentColor" strokeWidth="4" fill="none"
+                strokeDasharray={`${todayStats.winRate * 1.5} 150`}
+                className="text-primary transition-all duration-500"
               />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-lg font-bold">{todayStats.winRate.toFixed(0)}%</span>
-              <span className="text-xs text-muted-foreground">Win</span>
+              <span className="text-sm font-bold">{todayStats.winRate.toFixed(0)}%</span>
             </div>
           </div>
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-4 gap-3 pt-2 border-t border-border">
+        <div className="grid grid-cols-4 gap-2 pt-2 border-t border-border">
           <div className="text-center">
-            <div className="flex items-center justify-center gap-1 text-green-500 font-semibold">
-              <Trophy className="h-3.5 w-3.5" />
+            <div className="flex items-center justify-center gap-1 text-primary font-semibold text-sm">
+              <Trophy className="h-3 w-3" />
               {todayStats.wins}
             </div>
-            <div className="text-xs text-muted-foreground">Wins</div>
+            <div className="text-[10px] text-muted-foreground">Wins</div>
           </div>
           <div className="text-center">
-            <div className="flex items-center justify-center gap-1 text-red-500 font-semibold">
-              <Target className="h-3.5 w-3.5" />
+            <div className="flex items-center justify-center gap-1 text-destructive font-semibold text-sm">
+              <Target className="h-3 w-3" />
               {todayStats.losses}
             </div>
-            <div className="text-xs text-muted-foreground">Losses</div>
+            <div className="text-[10px] text-muted-foreground">Losses</div>
           </div>
           <div className="text-center">
-            <div className={cn(
-              "font-semibold",
-              todayStats.avgProfit >= 0 ? "text-green-500" : "text-red-500"
-            )}>
+            <div className={cn("font-semibold text-sm tabular-nums", todayStats.avgProfit >= 0 ? "text-primary" : "text-destructive")}>
               ${todayStats.avgProfit.toFixed(2)}
             </div>
-            <div className="text-xs text-muted-foreground">Avg Trade</div>
+            <div className="text-[10px] text-muted-foreground">Avg Trade</div>
           </div>
           <div className="text-center">
-            <div className="font-semibold text-green-500">
+            <div className="font-semibold text-sm text-primary tabular-nums">
               ${todayStats.bestTrade.toFixed(2)}
             </div>
-            <div className="text-xs text-muted-foreground">Best Trade</div>
-          </div>
-        </div>
-
-        {/* Hourly Performance Bar */}
-        <div className="space-y-2 pt-2 border-t border-border">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Clock className="h-4 w-4" />
-            Hourly Performance
-          </div>
-          <div className="flex items-end gap-0.5 h-12">
-            {Array.from({ length: 24 }, (_, hour) => {
-              const pnl = todayStats.hourlyPnL[hour] || 0;
-              const heightPercent = Math.abs(pnl) / hourlyRange * 50;
-              const isPositive = pnl >= 0;
-              
-              return (
-                <div
-                  key={hour}
-                  className="flex-1 flex flex-col justify-center relative group"
-                  style={{ height: '100%' }}
-                >
-                  <div
-                    className={cn(
-                      "w-full rounded-sm transition-all duration-300",
-                      pnl !== 0 && (isPositive ? "bg-green-500/80" : "bg-red-500/80"),
-                      pnl === 0 && "bg-muted h-0.5"
-                    )}
-                    style={{
-                      height: pnl !== 0 ? `${Math.max(heightPercent, 8)}%` : '2px',
-                      marginTop: isPositive ? 'auto' : undefined,
-                      marginBottom: !isPositive ? 'auto' : undefined,
-                    }}
-                  />
-                  {pnl !== 0 && (
-                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-1.5 py-0.5 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-lg">
-                      {hour}:00 - ${pnl.toFixed(2)}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>00:00</span>
-            <span>12:00</span>
-            <span>24:00</span>
+            <div className="text-[10px] text-muted-foreground">Best</div>
           </div>
         </div>
       </CardContent>
