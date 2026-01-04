@@ -1,0 +1,1 @@
+UPDATE bot_settings SET max_open_positions = 50 WHERE id IS NOT NULL;

@@ -4,296 +4,202 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { TrendingUp, TrendingDown, AlertTriangle, Loader2 } from 'lucide-react';
 import { EXCHANGE_CONFIGS } from '@/types/trading';
 import { toast } from 'sonner';
-import { ProfitProgressIndicator } from './cards/ProfitProgressIndicator';
+import { cn } from '@/lib/utils';
 
 export function PositionsPanel() {
   const { positions, loading, closePosition, closeAllPositions, exchanges, prices } = useTrading();
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
-  const [isClosing, setIsClosing] = useState(false);
 
   const getExchangeName = (exchangeId?: string) => {
-    if (!exchangeId) return 'Unknown';
+    if (!exchangeId) return 'Unk';
     const exchange = exchanges.find(e => e.id === exchangeId);
-    if (!exchange) return 'Unknown';
+    if (!exchange) return 'Unk';
     const config = EXCHANGE_CONFIGS.find(c => c.name === exchange.exchange);
-    return config?.displayName || exchange.exchange;
-  };
-
-  const getExchangeLogo = (exchangeId?: string) => {
-    if (!exchangeId) return '❓';
-    const exchange = exchanges.find(e => e.id === exchangeId);
-    if (!exchange) return '❓';
-    const config = EXCHANGE_CONFIGS.find(c => c.name === exchange.exchange);
-    return config?.logo || '❓';
+    return config?.displayName?.slice(0, 3) || exchange.exchange.slice(0, 3);
   };
 
   const totalPnl = positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
 
-  // STRICT RULE: Cannot close at a loss - only profitable positions can be closed
   const handleClosePosition = async (positionId: string, pnl: number, profitTarget: number, symbol: string) => {
-    // STRICT: Only allow closing if position is at or above profit target
     if (pnl < profitTarget) {
-      toast.error(`Cannot close ${symbol} yet`, {
-        description: `Position must reach profit target (+$${profitTarget.toFixed(2)}). Current: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`,
+      toast.error(`Cannot close ${symbol}`, {
+        description: `Need +$${profitTarget.toFixed(2)}, at ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`,
         dismissible: true,
       });
       return;
     }
     
-    await executeClose(positionId);
-  };
-
-  const executeClose = async (positionId: string) => {
     setClosingPositionId(positionId);
-    setIsClosing(true);
     try {
       await closePosition(positionId);
-      toast.success('Position Closed at Profit Target', { dismissible: true });
+      toast.success('Position Closed', { dismissible: true });
     } catch {
-      toast.error('Failed to close position', { dismissible: true });
+      toast.error('Failed to close', { dismissible: true });
     } finally {
       setClosingPositionId(null);
-      setIsClosing(false);
     }
   };
 
-  // STRICT: Close All only closes profitable positions
   const handleCloseAll = async () => {
-    const profitablePositions = positions.filter(p => p.unrealized_pnl >= p.profit_target);
-    const unprofitableCount = positions.length - profitablePositions.length;
-    
-    if (profitablePositions.length === 0) {
-      toast.error('No positions at profit target', {
-        description: `${unprofitableCount} position(s) still waiting to reach target`,
-        dismissible: true,
-      });
+    const profitable = positions.filter(p => p.unrealized_pnl >= p.profit_target);
+    if (profitable.length === 0) {
+      toast.error('No positions at target', { dismissible: true });
       return;
     }
     
     try {
       await closeAllPositions();
-      toast.success(`Closed ${profitablePositions.length} profitable position(s)`, {
-        description: unprofitableCount > 0 ? `${unprofitableCount} still waiting for target` : undefined,
-        dismissible: true,
-      });
+      toast.success(`Closed ${profitable.length} positions`, { dismissible: true });
     } catch {
-      toast.error('Failed to close positions', { dismissible: true });
+      toast.error('Failed', { dismissible: true });
     }
-  };
-
-  // ETA calculation moved to ProfitProgressIndicator component
-
-  // Calculate required exit price for profit target with fee breakdown
-  const getTargetPriceInfo = (position: typeof positions[0]) => {
-    const feeRate = position.trade_type === 'spot' ? 0.001 : 0.0005;
-    const entryFee = position.order_size_usd * feeRate;
-    const exitFee = position.order_size_usd * feeRate;
-    const fundingFee = position.trade_type === 'futures' ? position.order_size_usd * 0.0001 : 0;
-    const totalFees = entryFee + exitFee + fundingFee;
-    
-    // Required gross profit to achieve target after fees
-    const requiredGrossProfit = position.profit_target + totalFees;
-    
-    // Calculate target price based on direction
-    const leverage = position.leverage || 1;
-    const priceMovementNeeded = requiredGrossProfit / (position.quantity * leverage);
-    
-    let targetPrice: number;
-    if (position.direction === 'long') {
-      targetPrice = position.entry_price + priceMovementNeeded;
-    } else {
-      targetPrice = position.entry_price - priceMovementNeeded;
-    }
-    
-    const priceChangePercent = (priceMovementNeeded / position.entry_price) * 100;
-    
-    return {
-      targetPrice,
-      priceMovement: priceMovementNeeded,
-      priceChangePercent,
-      entryFee,
-      exitFee,
-      fundingFee,
-      totalFees,
-    };
   };
 
   if (loading) {
     return (
       <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
-        <CardHeader>
-          <Skeleton className="h-6 w-40" />
+        <CardHeader className="py-1.5 px-2">
+          <Skeleton className="h-4 w-24" />
         </CardHeader>
-        <CardContent className="space-y-4">
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
+        <CardContent className="p-2 space-y-1">
+          <Skeleton className="h-12" />
+          <Skeleton className="h-12" />
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <>
-      <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-foreground">Active Positions</CardTitle>
-            <p className="text-sm text-muted-foreground mt-1">
-              {positions.length} position{positions.length !== 1 ? 's' : ''} • 
-              <span className={totalPnl >= 0 ? ' text-primary' : ' text-destructive'}>
-                {' '}${totalPnl.toFixed(2)} unrealized
-              </span>
-            </p>
+    <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
+      <CardHeader className="flex flex-row items-center justify-between flex-shrink-0 py-1.5 px-2">
+        <div>
+          <CardTitle className="text-xs text-foreground">Positions</CardTitle>
+          <p className="text-[10px] text-muted-foreground">
+            {positions.length} open • 
+            <span className={totalPnl >= 0 ? ' text-primary' : ' text-destructive'}>
+              {' '}${totalPnl.toFixed(2)}
+            </span>
+          </p>
+        </div>
+        {positions.length > 0 && (
+          <Button 
+            variant="destructive" 
+            size="sm"
+            onClick={handleCloseAll}
+            className="h-5 px-1.5 text-[10px] gap-0.5"
+          >
+            <AlertTriangle className="h-2.5 w-2.5" />
+            Close All
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="flex-1 overflow-hidden p-0 min-h-0">
+        {positions.length === 0 ? (
+          <div className="text-center py-4 text-muted-foreground">
+            <p className="text-xs">No positions</p>
           </div>
-          {positions.length > 0 && (
-            <Button 
-              variant="destructive" 
-              size="sm"
-              onClick={handleCloseAll}
-              className="gap-1"
-            >
-              <AlertTriangle className="h-3 w-3" />
-              Close All
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent>
-          {positions.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <p>No active positions</p>
-              <p className="text-sm mt-1">Positions will appear here when the bot opens trades</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
+        ) : (
+          <ScrollArea className="h-full">
+            <div className="space-y-1 p-1.5">
               {positions.map((position) => {
                 const pnlPercent = position.entry_price > 0 
                   ? ((position.unrealized_pnl / position.order_size_usd) * 100)
                   : 0;
                 const currentPrice = prices[position.symbol] || position.current_price;
-                const isThisClosing = closingPositionId === position.id;
+                const isClosing = closingPositionId === position.id;
+                const canClose = position.unrealized_pnl >= position.profit_target;
+                const progressPct = Math.min(100, Math.max(0, (position.unrealized_pnl / position.profit_target) * 100));
                 
                 return (
                   <div 
                     key={position.id}
-                    className="p-3 rounded-lg bg-secondary/50 border border-border"
+                    className="p-1.5 rounded bg-secondary/50 border border-border/50"
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-3">
-                        <span className="text-xl">{getExchangeLogo(position.exchange_id)}</span>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-foreground">{position.symbol}</span>
-                            <Badge 
-                              variant={position.direction === 'long' ? 'default' : 'destructive'}
-                              className={position.direction === 'long' ? 'bg-primary text-primary-foreground' : ''}
-                            >
-                              {position.direction === 'long' ? (
-                                <><TrendingUp className="h-3 w-3 mr-1" />LONG</>
-                              ) : (
-                                <><TrendingDown className="h-3 w-3 mr-1" />SHORT</>
-                              )}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <div className="flex flex-col items-center w-8 flex-shrink-0">
+                          <Badge 
+                            variant={position.direction === 'long' ? 'default' : 'destructive'}
+                            className="text-[8px] px-1 py-0"
+                          >
+                            {position.direction === 'long' ? <TrendingUp className="h-2 w-2" /> : <TrendingDown className="h-2 w-2" />}
+                          </Badge>
+                          <span className="text-[8px] text-muted-foreground mt-0.5">
+                            {getExchangeName(position.exchange_id)}
+                          </span>
+                        </div>
+                        
+                        <div className="min-w-0 border-l border-border pl-1.5">
+                          <div className="flex items-center gap-1">
+                            <span className="font-medium text-foreground text-xs truncate">
+                              {position.symbol}
+                            </span>
+                            <Badge variant="outline" className="text-[8px] px-0.5 py-0">
+                              {position.trade_type[0]}
                             </Badge>
-                            <Badge variant="outline" className="text-xs">
-                              {position.trade_type}
-                            </Badge>
-                            {/* Take-profit order status */}
-                            {position.take_profit_order_id && (
-                              <Badge 
-                                variant={
-                                  position.take_profit_status === 'pending' ? 'outline' :
-                                  position.take_profit_status === 'filled' ? 'default' : 'secondary'
-                                }
-                                className={`text-xs ${position.take_profit_status === 'pending' ? 'text-yellow-500 border-yellow-500/50' : ''}`}
-                              >
-                                TP: ${position.take_profit_price?.toFixed(2)}
-                              </Badge>
+                            {position.leverage && position.leverage > 1 && (
+                              <span className="text-[8px] text-muted-foreground">{position.leverage}x</span>
                             )}
                           </div>
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                            <span>{getExchangeName(position.exchange_id)}</span>
-                            <span>Entry: ${position.entry_price.toFixed(4)}</span>
-                            <span className="text-foreground font-medium">
-                              Now: ${currentPrice?.toFixed(4) || '-'}
-                            </span>
-                            {position.leverage && position.leverage > 1 && <span>{position.leverage}x</span>}
+                          <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
+                            <span>${position.entry_price.toFixed(2)}</span>
+                            <span>→</span>
+                            <span className="text-foreground">${currentPrice?.toFixed(2) || '-'}</span>
                           </div>
-                          {/* Profit Target Calculator with Fee Breakdown */}
-                          {(() => {
-                            const targetInfo = getTargetPriceInfo(position);
-                            return (
-                              <div className="flex flex-wrap items-center gap-3 text-xs mt-1">
-                                <span className="text-muted-foreground">
-                                  Target: <span className="text-foreground font-medium">${targetInfo.targetPrice.toFixed(4)}</span>
-                                </span>
-                                <span className="text-muted-foreground">
-                                  Need: <span className={`font-medium ${position.direction === 'long' ? 'text-primary' : 'text-destructive'}`}>
-                                    {position.direction === 'long' ? '+' : '-'}${Math.abs(targetInfo.priceMovement).toFixed(4)} ({targetInfo.priceChangePercent.toFixed(3)}%)
-                                  </span>
-                                </span>
-                                <span className="text-muted-foreground">
-                                  Fees: <span className="text-foreground">
-                                    entry ${targetInfo.entryFee.toFixed(2)} | exit ${targetInfo.exitFee.toFixed(2)}{targetInfo.fundingFee > 0 && ` | funding ${targetInfo.fundingFee.toFixed(2)}`} (${targetInfo.totalFees.toFixed(2)})
-                                  </span>
-                                </span>
-                              </div>
-                            );
-                          })()}
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
                         <div className="text-right">
-                          <div className={`font-mono font-medium ${position.unrealized_pnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                          <div className={cn("font-mono text-xs font-medium", position.unrealized_pnl >= 0 ? 'text-primary' : 'text-destructive')}>
                             {position.unrealized_pnl >= 0 ? '+' : ''}${position.unrealized_pnl.toFixed(2)}
                           </div>
-                          <div className={`text-xs ${pnlPercent >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                            {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
+                          <div className={cn("text-[9px]", pnlPercent >= 0 ? 'text-primary' : 'text-destructive')}>
+                            {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
                           </div>
                         </div>
-                        {/* STRICT: Only show close button if at profit target */}
-                        {position.unrealized_pnl >= position.profit_target ? (
+                        {canClose ? (
                           <Button
                             variant="default"
                             size="sm"
                             onClick={() => handleClosePosition(position.id, position.unrealized_pnl, position.profit_target, position.symbol)}
-                            disabled={isThisClosing}
-                            className="gap-1 bg-primary hover:bg-primary/90"
+                            disabled={isClosing}
+                            className="h-5 px-1.5 text-[10px] gap-0.5 bg-primary hover:bg-primary/90"
                           >
-                            {isThisClosing ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <TrendingUp className="h-4 w-4" />
-                            )}
-                            Take Profit
+                            {isClosing ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <TrendingUp className="h-2.5 w-2.5" />}
+                            TP
                           </Button>
                         ) : (
-                          <Badge variant="outline" className="text-xs text-muted-foreground">
-                            Waiting for target...
-                          </Badge>
+                          <div className="w-10 text-center">
+                            <div className="text-[8px] text-muted-foreground">
+                              +${position.profit_target.toFixed(0)}
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>
-
-                    {/* Real-time Progress Indicator with Countdown */}
-                    <div className="mt-2">
-                      <ProfitProgressIndicator
-                        currentPnl={position.unrealized_pnl}
-                        profitTarget={position.profit_target}
-                        openedAt={position.opened_at}
-                        symbol={position.symbol}
-                        isClosing={isThisClosing}
+                    
+                    {/* Progress bar */}
+                    <div className="mt-1 h-1 bg-secondary rounded-full overflow-hidden">
+                      <div 
+                        className={cn(
+                          "h-full transition-all duration-300",
+                          progressPct >= 100 ? "bg-primary" : progressPct >= 50 ? "bg-yellow-500" : "bg-destructive"
+                        )}
+                        style={{ width: `${progressPct}%` }}
                       />
                     </div>
                   </div>
                 );
               })}
             </div>
-          )}
-        </CardContent>
-      </Card>
-    </>
+          </ScrollArea>
+        )}
+      </CardContent>
+    </Card>
   );
 }

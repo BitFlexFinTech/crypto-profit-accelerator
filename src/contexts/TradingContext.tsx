@@ -203,6 +203,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const positionsRef = useRef<Position[]>([]);
   const signalsRef = useRef<TradingSignal[]>([]);
   const exchangesRef = useRef<Exchange[]>([]);
+  const balancesRef = useRef<Balance[]>([]);
   // Ref for runTradingLoop to break circular dependency
   const runTradingLoopRef = useRef<() => Promise<void>>(() => Promise.resolve());
   
@@ -211,6 +212,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   useEffect(() => { positionsRef.current = positions; }, [positions]);
   useEffect(() => { signalsRef.current = signals; }, [signals]);
   useEffect(() => { exchangesRef.current = exchanges; }, [exchanges]);
+  useEffect(() => { balancesRef.current = balances; }, [balances]);
 
   // Add execution log entry (ring buffer)
   const appendExecutionLog = useCallback((entry: Omit<ExecutionLogEntry, 'timestamp'>) => {
@@ -738,14 +740,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     const currentSettings = settingsRef.current;
     const currentExchanges = exchangesRef.current;
     const currentPositions = positionsRef.current;
+    const currentBalances = balancesRef.current;
     
     if (!currentSettings) {
       appendExecutionLog({ type: 'BLOCKED', message: 'No settings loaded' });
       return false;
     }
 
-    // Check max positions (skip for test trade if desired, but we respect it by default)
-    if (currentPositions.length >= (currentSettings.max_open_positions || 10)) {
+    // Check max positions
+    if (currentPositions.length >= (currentSettings.max_open_positions || 50)) {
       appendExecutionLog({ 
         type: 'BLOCKED', 
         message: `Max positions reached (${currentPositions.length}/${currentSettings.max_open_positions})`,
@@ -753,6 +756,17 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       });
       return false;
     }
+
+    // Calculate total available USDT across all exchanges
+    const totalAvailableUSDT = currentBalances
+      .filter(b => b.currency === 'USDT')
+      .reduce((sum, b) => sum + (b.available || 0), 0);
+
+    // Calculate currently locked in positions
+    const lockedInPositions = currentPositions.reduce((sum, p) => sum + (p.order_size_usd || 0), 0);
+    
+    // Available for new trades
+    const availableForTrades = totalAvailableUSDT - lockedInPositions;
 
     // Find exchange
     let targetExchange = currentExchanges.find(e => e.exchange === signal.exchange && e.is_connected);
@@ -764,11 +778,32 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
-    // Calculate order size
+    // Calculate order size - use all available balance optimally
+    // Target: Use up to 25% of available per trade, but respect min/max settings
+    const idealOrderSize = Math.min(availableForTrades * 0.25, currentSettings.max_order_size);
     const orderSize = Math.min(
       Math.max(currentSettings.min_order_size, 333),
-      currentSettings.max_order_size
+      idealOrderSize > currentSettings.min_order_size ? idealOrderSize : currentSettings.max_order_size
     );
+
+    // CRITICAL: Check if we have enough balance
+    if (orderSize > availableForTrades) {
+      appendExecutionLog({ 
+        type: 'BLOCKED', 
+        message: `Insufficient balance: $${availableForTrades.toFixed(2)} available, need $${orderSize.toFixed(2)}`,
+        symbol: signal.symbol,
+      });
+      return false;
+    }
+
+    if (orderSize < currentSettings.min_order_size) {
+      appendExecutionLog({ 
+        type: 'BLOCKED', 
+        message: `Order size $${orderSize.toFixed(2)} below minimum $${currentSettings.min_order_size}`,
+        symbol: signal.symbol,
+      });
+      return false;
+    }
 
     const profitTarget = signal.tradeType === 'futures' 
       ? currentSettings.futures_profit_target 

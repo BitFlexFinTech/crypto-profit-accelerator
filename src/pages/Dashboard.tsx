@@ -11,15 +11,13 @@ import { TradeVelocityDashboard } from '@/components/dashboard/cards/TradeVeloci
 
 export default function DashboardPage() {
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Header - Fixed 48px */}
-      <div className="flex-shrink-0 h-12 flex items-center justify-between px-3 border-b border-border bg-background/95 backdrop-blur-sm">
+    <div className="h-screen flex flex-col overflow-hidden bg-background">
+      {/* Compact Header - 40px */}
+      <div className="h-10 flex-shrink-0 flex items-center justify-between px-3 border-b border-border bg-card/50">
         <div className="flex items-center gap-3">
-          <h1 className="text-base font-bold text-foreground">Dashboard</h1>
-          <div className="flex items-center gap-1.5">
-            <EngineStatus />
-            <ConnectionStatus />
-          </div>
+          <h1 className="text-sm font-bold text-foreground">Dashboard</h1>
+          <EngineStatus />
+          <ConnectionStatus />
         </div>
         <div className="flex items-center gap-2">
           <GlobalSyncButton />
@@ -27,26 +25,34 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Main Content - Fixed layout, no scroll */}
+      {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Left Content Area - 2x2 Grid */}
-        <div className="flex-1 flex flex-col p-2 gap-2 overflow-hidden min-w-0">
-          {/* Stats Row - Compact */}
-          <div className="flex-shrink-0">
-            <StatsCards />
+        {/* Left Content - Stats + 2x2 Grid */}
+        <div className="flex-1 flex flex-col p-1.5 gap-1.5 min-h-0 min-w-0">
+          {/* Compact Stats Row - 56px */}
+          <div className="flex-shrink-0 h-14">
+            <StatsCards compact />
           </div>
 
-          {/* Main Grid - 2x2 layout */}
-          <div className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2 gap-2">
-            <RealTimePnL />
-            <TradeVelocityDashboard />
-            <LiveSignals />
-            <PositionsPanel />
+          {/* Main 2x2 Grid - fills remaining space */}
+          <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-1.5 min-h-0">
+            <div className="min-h-0 overflow-hidden">
+              <RealTimePnL />
+            </div>
+            <div className="min-h-0 overflow-hidden">
+              <TradeVelocityDashboard />
+            </div>
+            <div className="min-h-0 overflow-hidden">
+              <LiveSignals />
+            </div>
+            <div className="min-h-0 overflow-hidden">
+              <PositionsPanel />
+            </div>
           </div>
         </div>
 
-        {/* Right Panel - Trade Execution Log (Full Height) */}
-        <div className="w-72 flex-shrink-0 border-l border-border flex flex-col overflow-hidden">
+        {/* Right Panel - Trade Execution Log */}
+        <div className="w-64 flex-shrink-0 border-l border-border overflow-hidden">
           <TradeExecutionLogPanel />
         </div>
       </div>

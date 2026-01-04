@@ -42,28 +42,28 @@ export function LiveSignals() {
 
   return (
     <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
-      <CardHeader className="flex flex-row items-center justify-between flex-shrink-0 pb-2">
-        <div>
-          <CardTitle className="text-foreground flex items-center gap-2 text-base">
-            <Zap className="h-4 w-4 text-primary" />
+      <CardHeader className="flex flex-row items-center justify-between flex-shrink-0 py-1.5 px-2">
+        <div className="min-w-0">
+          <CardTitle className="text-foreground flex items-center gap-1.5 text-xs">
+            <Zap className="h-3 w-3 text-primary flex-shrink-0" />
             Live Signals
             {isScanning && (
-              <Badge variant="outline" className="gap-1 text-xs">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Scanning
+              <Badge variant="outline" className="gap-0.5 text-[10px] px-1 py-0">
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                Scan
               </Badge>
             )}
           </CardTitle>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-1.5 mt-0.5">
             {engineMetrics.lastScanTime && (
-              <p className="text-xs text-muted-foreground">
-                Updated: {formatDistanceToNow(engineMetrics.lastScanTime, { addSuffix: true })}
+              <p className="text-[10px] text-muted-foreground truncate">
+                {formatDistanceToNow(engineMetrics.lastScanTime, { addSuffix: true })}
               </p>
             )}
             {blacklistedCount > 0 && (
-              <Badge variant="destructive" className="text-[10px] gap-1">
-                <Ban className="h-2.5 w-2.5" />
-                {blacklistedCount} slow
+              <Badge variant="destructive" className="text-[8px] gap-0.5 px-1 py-0">
+                <Ban className="h-2 w-2" />
+                {blacklistedCount}
               </Badge>
             )}
           </div>
@@ -73,29 +73,28 @@ export function LiveSignals() {
           size="sm" 
           onClick={handleRefresh}
           disabled={isAnalyzing}
-          className="h-8"
+          className="h-6 px-2 text-[10px]"
         >
-          <RefreshCw className={`h-3 w-3 mr-1 ${isAnalyzing ? 'animate-spin' : ''}`} />
-          {isAnalyzing ? 'Scanning' : 'Refresh'}
+          <RefreshCw className={`h-2.5 w-2.5 mr-0.5 ${isAnalyzing ? 'animate-spin' : ''}`} />
+          {isAnalyzing ? 'Scan' : 'Refresh'}
         </Button>
       </CardHeader>
-      <CardContent className="flex-1 overflow-hidden p-0">
+      <CardContent className="flex-1 overflow-hidden p-0 min-h-0">
         {isAnalyzing && signals.length === 0 ? (
-          <div className="space-y-2 p-4">
-            <Skeleton className="h-16" />
-            <Skeleton className="h-16" />
-            <Skeleton className="h-16" />
+          <div className="space-y-1 p-2">
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
           </div>
         ) : signals.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <Zap className="h-10 w-10 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No signals available</p>
-            <p className="text-xs mt-1">AI is scanning markets every 2s</p>
+          <div className="text-center py-4 text-muted-foreground">
+            <Zap className="h-6 w-6 mx-auto mb-1 opacity-50" />
+            <p className="text-xs">No signals</p>
           </div>
         ) : (
           <ScrollArea className="h-full">
-            <div className="space-y-2 p-4 pt-0">
-              {signals.slice(0, 6).map((signal, index) => {
+            <div className="space-y-1 p-1.5">
+              {signals.slice(0, 8).map((signal, index) => {
                 const isBlacklisted = slowPairBlacklist.has(signal.symbol);
                 const speedScore = getPairSpeedScore(signal.symbol);
                 
@@ -103,75 +102,61 @@ export function LiveSignals() {
                   <div 
                     key={`${signal.symbol}-${index}`}
                     className={cn(
-                      "flex items-center justify-between p-2.5 rounded-lg bg-secondary/50 border border-border animate-fade-in",
-                      isBlacklisted && "opacity-60 border-destructive/30"
+                      "flex items-center justify-between p-1.5 rounded bg-secondary/50 border border-border/50",
+                      isBlacklisted && "opacity-50 border-destructive/30"
                     )}
-                    style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    <div className="flex items-center gap-2">
-                      {/* Rank & Score */}
-                      <div className="flex flex-col items-center min-w-[40px]">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="flex flex-col items-center w-8 flex-shrink-0">
                         <Badge 
                           variant="outline" 
-                          className={`text-[10px] font-bold px-1.5 py-0 ${
+                          className={`text-[8px] font-bold px-1 py-0 ${
                             index === 0 ? 'border-yellow-500 text-yellow-500' :
                             index === 1 ? 'border-gray-400 text-gray-400' :
-                            index === 2 ? 'border-amber-600 text-amber-600' :
                             'border-muted-foreground'
                           }`}
                         >
                           #{index + 1}
                         </Badge>
-                        <span className={`text-lg font-bold ${getScoreColor(signal.score)}`}>
+                        <span className={`text-sm font-bold ${getScoreColor(signal.score)}`}>
                           {signal.score}
                         </span>
                       </div>
                       
-                      <div className="border-l border-border pl-2">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className={cn("font-medium text-foreground text-sm", isBlacklisted && "line-through")}>
+                      <div className="min-w-0 border-l border-border pl-1.5">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className={cn("font-medium text-foreground text-xs truncate", isBlacklisted && "line-through")}>
                             {signal.symbol}
                           </span>
                           <Badge 
                             variant={signal.direction === 'long' ? 'default' : 'destructive'}
-                            className="text-[10px] px-1.5 py-0"
+                            className="text-[8px] px-1 py-0"
                           >
-                            {signal.direction === 'long' ? (
-                              <><TrendingUp className="h-2.5 w-2.5 mr-0.5" />LONG</>
-                            ) : (
-                              <><TrendingDown className="h-2.5 w-2.5 mr-0.5" />SHORT</>
-                            )}
+                            {signal.direction === 'long' ? <TrendingUp className="h-2 w-2" /> : <TrendingDown className="h-2 w-2" />}
                           </Badge>
-                          {isBlacklisted && (
-                            <Badge variant="destructive" className="text-[10px] px-1 py-0 gap-0.5">
-                              <Ban className="h-2.5 w-2.5" /> SLOW
-                            </Badge>
-                          )}
+                          {isBlacklisted && <Ban className="h-2.5 w-2.5 text-destructive" />}
                         </div>
-                        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5">
+                        <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
                           <span className="capitalize">{signal.exchange}</span>
-                          <span>•</span>
-                          <Badge className={`text-[10px] px-1 py-0 ${getVolatilityBadge(signal.volatility)}`}>
-                            {signal.volatility}
+                          <Badge className={`text-[8px] px-0.5 py-0 ${getVolatilityBadge(signal.volatility)}`}>
+                            {signal.volatility[0]}
                           </Badge>
-                          <span>•</span>
                           <span className={cn(
-                            "font-medium",
                             speedScore >= 80 ? 'text-primary' :
                             speedScore >= 50 ? 'text-yellow-500' :
                             'text-destructive'
                           )}>
-                            Speed: {speedScore}
+                            S:{speedScore}
                           </span>
                         </div>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="font-mono text-xs text-foreground">
-                        ${signal.entryPrice.toFixed(4)}
+                    <div className="text-right flex-shrink-0">
+                      <div className="font-mono text-[10px] text-foreground">
+                        ${signal.entryPrice.toFixed(2)}
                       </div>
-                      <div className="flex items-center gap-1 text-[10px] text-primary">
-                        <Clock className="h-2.5 w-2.5" />
+                      <div className="flex items-center gap-0.5 text-[9px] text-primary">
+                        <Clock className="h-2 w-2" />
                         {signal.estimatedTimeToProfit}
                       </div>
                     </div>
