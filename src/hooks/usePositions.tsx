@@ -129,17 +129,28 @@ export function usePositions() {
     setPositions(prev => prev.map(p => {
       if (p.id !== positionId) return p;
       
-      let pnl: number;
+      // Calculate gross PnL
+      let grossPnl: number;
       if (p.direction === 'long') {
-        pnl = (currentPrice - p.entry_price) * p.quantity * (p.leverage || 1);
+        grossPnl = (currentPrice - p.entry_price) * p.quantity * (p.leverage || 1);
       } else {
-        pnl = (p.entry_price - currentPrice) * p.quantity * (p.leverage || 1);
+        grossPnl = (p.entry_price - currentPrice) * p.quantity * (p.leverage || 1);
       }
+      
+      // Calculate fees (matching the checkProfitTargets calculation)
+      const feeRate = p.trade_type === 'spot' ? 0.001 : 0.0005;
+      const entryFee = p.order_size_usd * feeRate;
+      const exitFee = p.order_size_usd * feeRate;
+      const fundingFee = p.trade_type === 'futures' ? p.order_size_usd * 0.0001 : 0;
+      const totalFees = entryFee + exitFee + fundingFee;
+      
+      // Net PnL after all fees
+      const netPnl = grossPnl - totalFees;
       
       return {
         ...p,
         current_price: currentPrice,
-        unrealized_pnl: pnl,
+        unrealized_pnl: netPnl,
       };
     }));
   };

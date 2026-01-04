@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TrendingUp, TrendingDown, Clock, Target, Award, Percent, DollarSign, Activity } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 export function TradePerformancePanel() {
   const { 
@@ -18,6 +19,7 @@ export function TradePerformancePanel() {
     getProfitByDirection,
     getClosedTradesCount,
     getTotalFees,
+    getCumulativePnLData,
   } = useTrades();
 
   if (loading) {
@@ -42,6 +44,7 @@ export function TradePerformancePanel() {
   const byDirection = getProfitByDirection();
   const closedCount = getClosedTradesCount();
   const totalFees = getTotalFees();
+  const cumulativePnLData = getCumulativePnLData();
 
   // Format average time to target
   const formatTime = (ms: number): string => {
@@ -73,6 +76,69 @@ export function TradePerformancePanel() {
           </div>
         ) : (
           <div className="space-y-6">
+            {/* Cumulative P&L Chart */}
+            {cumulativePnLData.length > 1 && (
+              <div className="p-4 rounded-lg bg-secondary/50 border border-border">
+                <div className="flex items-center gap-2 text-muted-foreground text-sm mb-3">
+                  <TrendingUp className="h-4 w-4" />
+                  Cumulative P&L
+                </div>
+                <div className="h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={cumulativePnLData}>
+                      <defs>
+                        <linearGradient id="profitGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="lossGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis 
+                        dataKey="date" 
+                        tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                        tickLine={false}
+                        axisLine={false}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis 
+                        tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                        tickFormatter={(v) => `$${v}`}
+                        tickLine={false}
+                        axisLine={false}
+                        width={50}
+                      />
+                      <Tooltip 
+                        content={({ active, payload }) => {
+                          if (!active || !payload?.length) return null;
+                          const data = payload[0].payload;
+                          return (
+                            <div className="bg-popover border border-border rounded-md p-2 text-xs shadow-lg">
+                              <p className="text-muted-foreground">{data.trade}</p>
+                              <p className={`font-mono font-medium ${data.cumulativeProfit >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                                {data.cumulativeProfit >= 0 ? '+' : ''}${data.cumulativeProfit.toFixed(2)}
+                              </p>
+                              <p className="text-muted-foreground text-[10px]">{data.date}</p>
+                            </div>
+                          );
+                        }}
+                      />
+                      <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" strokeOpacity={0.5} />
+                      <Area
+                        type="monotone"
+                        dataKey="cumulativeProfit"
+                        stroke={totalProfit >= 0 ? 'hsl(var(--primary))' : 'hsl(var(--destructive))'}
+                        strokeWidth={2}
+                        fill={totalProfit >= 0 ? 'url(#profitGradient)' : 'url(#lossGradient)'}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
             {/* Primary Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="p-4 rounded-lg bg-secondary/50 border border-border">
