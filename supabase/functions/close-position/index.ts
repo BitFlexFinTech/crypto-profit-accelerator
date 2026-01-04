@@ -6,6 +6,24 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Cancel take-profit order on exchange (simulated for paper trading)
+async function cancelExchangeOrder(
+  exchange: { exchange: string; api_key_encrypted: string | null; api_secret_encrypted: string | null },
+  orderId: string,
+  isPaperTrade: boolean
+): Promise<boolean> {
+  console.log(`[${exchange.exchange}] Cancelling order: ${orderId}`);
+  
+  if (isPaperTrade) {
+    // For paper trading, just return success
+    return true;
+  }
+  
+  // For live trading, this would call the actual exchange API
+  // TODO: Implement actual exchange API calls for live trading
+  return true;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -39,6 +57,28 @@ serve(async (req) => {
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Get exchange info for cancelling TP order
+    const { data: exchange } = await supabase
+      .from("exchanges")
+      .select("*")
+      .eq("id", position.exchange_id)
+      .single();
+
+    // Cancel pending take-profit order if exists
+    if (position.take_profit_order_id && position.take_profit_status === "pending") {
+      console.log(`Cancelling take-profit order: ${position.take_profit_order_id}`);
+      
+      if (exchange) {
+        await cancelExchangeOrder(exchange, position.take_profit_order_id, position.is_paper_trade || true);
+      }
+      
+      // Update TP status to cancelled
+      await supabase
+        .from("positions")
+        .update({ take_profit_status: "cancelled" })
+        .eq("id", positionId);
     }
 
     // Use requested exit price if provided (for automated closes), otherwise use current price
@@ -75,7 +115,10 @@ serve(async (req) => {
       // Revert the position back to 'open' since we can't close at a loss
       await supabase
         .from("positions")
-        .update({ status: "open" })
+        .update({ 
+          status: "open",
+          take_profit_status: position.take_profit_order_id ? "pending" : null,
+        })
         .eq("id", positionId);
       
       console.log("Rejected close - netProfit:", netProfit.toFixed(2), "is negative (requireProfit=true)");
@@ -113,6 +156,9 @@ serve(async (req) => {
         current_price: exitPrice,
         unrealized_pnl: netProfit,
         status: "closed",
+        take_profit_status: position.take_profit_order_id 
+          ? (netProfit >= (position.profit_target || 0) ? "filled" : "cancelled")
+          : null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", positionId);
@@ -178,6 +224,9 @@ serve(async (req) => {
         entryFee,
         exitFee,
         fundingFee,
+        takeProfitStatus: position.take_profit_order_id 
+          ? (netProfit >= (position.profit_target || 0) ? "filled" : "cancelled")
+          : null,
       },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

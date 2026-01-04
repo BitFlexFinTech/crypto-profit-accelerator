@@ -199,6 +199,18 @@ export function PositionsPanel() {
                             <Badge variant="outline" className="text-xs">
                               {position.trade_type}
                             </Badge>
+                            {/* Take-profit order status */}
+                            {position.take_profit_order_id && (
+                              <Badge 
+                                variant={
+                                  position.take_profit_status === 'pending' ? 'outline' :
+                                  position.take_profit_status === 'filled' ? 'default' : 'secondary'
+                                }
+                                className={`text-xs ${position.take_profit_status === 'pending' ? 'text-yellow-500 border-yellow-500/50' : ''}`}
+                              >
+                                TP: ${position.take_profit_price?.toFixed(2)}
+                              </Badge>
+                            )}
                           </div>
                           <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
                             <span>{getExchangeName(position.exchange_id)}</span>

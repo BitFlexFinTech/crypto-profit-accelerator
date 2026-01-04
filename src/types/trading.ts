@@ -92,6 +92,10 @@ export interface Position {
   is_paper_trade: boolean;
   opened_at: string;
   updated_at: string;
+  // Take-profit order tracking
+  take_profit_order_id?: string;
+  take_profit_price?: number;
+  take_profit_status?: 'pending' | 'filled' | 'cancelled';
 }
 
 export interface Notification {
