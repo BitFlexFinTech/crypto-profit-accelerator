@@ -1,11 +1,12 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { LayoutDashboard, TrendingUp, History, Settings, Zap } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, History, Settings, Zap, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/charts', label: 'Charts', icon: BarChart3 },
   { path: '/positions', label: 'Positions', icon: TrendingUp },
   { path: '/history', label: 'History', icon: History },
   { path: '/settings', label: 'Settings', icon: Settings },

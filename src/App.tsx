@@ -8,6 +8,7 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { SetupWizard } from "@/components/wizard/SetupWizard";
 import { useSetupProgress } from "@/hooks/useSetupProgress";
 import DashboardPage from "@/pages/Dashboard";
+import ChartsPage from "@/pages/Charts";
 import PositionsPage from "@/pages/Positions";
 import HistoryPage from "@/pages/History";
 import SettingsPage from "@/pages/Settings";
@@ -40,6 +41,7 @@ function AppContent() {
   return (
     <Routes>
       <Route path="/" element={<MainLayout><DashboardPage /></MainLayout>} />
+      <Route path="/charts" element={<MainLayout><ChartsPage /></MainLayout>} />
       <Route path="/positions" element={<MainLayout><PositionsPage /></MainLayout>} />
       <Route path="/history" element={<MainLayout><HistoryPage /></MainLayout>} />
       <Route path="/settings" element={<MainLayout><SettingsPage /></MainLayout>} />
