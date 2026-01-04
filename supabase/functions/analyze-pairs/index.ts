@@ -748,7 +748,8 @@ Respond ONLY with JSON array:
           entryPrice: candidate.price,
           targetPrice: candidate.price * (direction === "long" ? 1.001 : 0.999),
           reasoning: `${direction.toUpperCase()} [${candidate.speedRating}] - RSI ${technicals?.rsi.toFixed(0) || 50} (${technicals?.rsiSignal || 'neutral'}), MACD ${technicals?.macdSignal || 'neutral'}, BB ${((technicals?.bbPosition || 0.5) * 100).toFixed(0)}%`,
-          tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
+        // FIX: When mode="both", use futures for shorts (required for shorting) and spot for longs
+        tradeType: (mode === "futures" || (mode === "both" && direction === "short")) ? "futures" : "spot" as "spot" | "futures",
         };
       });
 
@@ -797,7 +798,8 @@ Respond ONLY with JSON array:
         entryPrice: marketInfo?.price || 0,
         targetPrice: marketInfo?.price ? marketInfo.price * (direction === "long" ? 1.001 : 0.999) : 0,
         reasoning: aiSignal.reasoning || `RSI ${technicals?.rsi.toFixed(0) || 50}, MACD ${technicals?.macdSignal || 'neutral'}`,
-        tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
+        // FIX: When mode="both", use futures for shorts and spot for longs
+        tradeType: (mode === "futures" || (mode === "both" && direction === "short")) ? "futures" : "spot" as "spot" | "futures",
       };
     });
 
@@ -818,7 +820,8 @@ Respond ONLY with JSON array:
           entryPrice: candidate.price,
           targetPrice: candidate.price * (direction === "long" ? 1.001 : 0.999),
           reasoning: `${direction.toUpperCase()} based on RSI/MACD/BB analysis`,
-          tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
+          // FIX: When mode="both", use futures for shorts and spot for longs
+          tradeType: (mode === "futures" || (mode === "both" && direction === "short")) ? "futures" : "spot" as "spot" | "futures",
         };
       });
 

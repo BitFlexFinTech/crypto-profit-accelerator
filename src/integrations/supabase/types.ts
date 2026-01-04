@@ -247,9 +247,12 @@ export type Database = {
         Row: {
           current_price: number | null
           direction: Database["public"]["Enums"]["position_direction"]
+          entry_order_id: string | null
           entry_price: number
           exchange_id: string | null
+          exit_order_id: string | null
           id: string
+          is_live: boolean | null
           is_paper_trade: boolean | null
           leverage: number | null
           opened_at: string | null
@@ -272,9 +275,12 @@ export type Database = {
         Insert: {
           current_price?: number | null
           direction: Database["public"]["Enums"]["position_direction"]
+          entry_order_id?: string | null
           entry_price: number
           exchange_id?: string | null
+          exit_order_id?: string | null
           id?: string
+          is_live?: boolean | null
           is_paper_trade?: boolean | null
           leverage?: number | null
           opened_at?: string | null
@@ -297,9 +303,12 @@ export type Database = {
         Update: {
           current_price?: number | null
           direction?: Database["public"]["Enums"]["position_direction"]
+          entry_order_id?: string | null
           entry_price?: number
           exchange_id?: string | null
+          exit_order_id?: string | null
           id?: string
+          is_live?: boolean | null
           is_paper_trade?: boolean | null
           leverage?: number | null
           opened_at?: string | null
@@ -374,13 +383,16 @@ export type Database = {
           created_at: string | null
           direction: Database["public"]["Enums"]["position_direction"]
           entry_fee: number | null
+          entry_order_id: string | null
           entry_price: number
           exchange_id: string | null
           exit_fee: number | null
+          exit_order_id: string | null
           exit_price: number | null
           funding_fee: number | null
           gross_profit: number | null
           id: string
+          is_live: boolean | null
           is_paper_trade: boolean | null
           leverage: number | null
           net_profit: number | null
@@ -402,13 +414,16 @@ export type Database = {
           created_at?: string | null
           direction: Database["public"]["Enums"]["position_direction"]
           entry_fee?: number | null
+          entry_order_id?: string | null
           entry_price: number
           exchange_id?: string | null
           exit_fee?: number | null
+          exit_order_id?: string | null
           exit_price?: number | null
           funding_fee?: number | null
           gross_profit?: number | null
           id?: string
+          is_live?: boolean | null
           is_paper_trade?: boolean | null
           leverage?: number | null
           net_profit?: number | null
@@ -430,13 +445,16 @@ export type Database = {
           created_at?: string | null
           direction?: Database["public"]["Enums"]["position_direction"]
           entry_fee?: number | null
+          entry_order_id?: string | null
           entry_price?: number
           exchange_id?: string | null
           exit_fee?: number | null
+          exit_order_id?: string | null
           exit_price?: number | null
           funding_fee?: number | null
           gross_profit?: number | null
           id?: string
+          is_live?: boolean | null
           is_paper_trade?: boolean | null
           leverage?: number | null
           net_profit?: number | null
