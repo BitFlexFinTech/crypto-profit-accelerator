@@ -1,27 +1,246 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createHmac } from "https://deno.land/std@0.177.0/node/crypto.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Cancel take-profit order on exchange (simulated for paper trading)
+interface ExchangeCredentials {
+  exchange: string;
+  apiKey: string;
+  apiSecret: string;
+  passphrase?: string;
+}
+
+// Format symbol for each exchange
+function formatSymbol(symbol: string, exchange: string): string {
+  const base = symbol.replace("/", "");
+  switch (exchange) {
+    case "binance":
+      return base;
+    case "okx":
+      return symbol.replace("/", "-");
+    case "bybit":
+      return base;
+    default:
+      return base;
+  }
+}
+
+// ============================================
+// BINANCE - CANCEL ORDER
+// ============================================
+async function cancelBinanceOrder(
+  credentials: ExchangeCredentials,
+  symbol: string,
+  orderId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const timestamp = Date.now();
+    const formattedSymbol = formatSymbol(symbol, "binance");
+    
+    const params = new URLSearchParams({
+      symbol: formattedSymbol,
+      orderId: orderId,
+      timestamp: timestamp.toString(),
+    });
+    
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(params.toString())
+      .digest("hex");
+    
+    console.log(`[Binance] Cancelling order: ${orderId} for ${formattedSymbol}`);
+    
+    const response = await fetch(
+      `https://api.binance.com/api/v3/order?${params}&signature=${signature}`,
+      {
+        method: "DELETE",
+        headers: { "X-MBX-APIKEY": credentials.apiKey },
+      }
+    );
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      // Order might already be filled or cancelled - treat as success
+      if (data.code === -2011) { // Unknown order
+        console.log(`[Binance] Order ${orderId} not found - may already be filled/cancelled`);
+        return { success: true };
+      }
+      console.error(`[Binance] Cancel failed:`, data);
+      return { success: false, error: data.msg || `API error: ${response.status}` };
+    }
+    
+    console.log(`[Binance] Order cancelled: ${orderId}`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[Binance] Cancel exception:`, error);
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+  }
+}
+
+// ============================================
+// OKX - CANCEL ORDER
+// ============================================
+async function cancelOKXOrder(
+  credentials: ExchangeCredentials,
+  symbol: string,
+  orderId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const timestamp = new Date().toISOString();
+    const formattedSymbol = formatSymbol(symbol, "okx");
+    
+    const body = JSON.stringify({
+      instId: formattedSymbol,
+      ordId: orderId,
+    });
+    
+    const preHash = timestamp + "POST" + "/api/v5/trade/cancel-order" + body;
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(preHash)
+      .digest("base64");
+    
+    console.log(`[OKX] Cancelling order: ${orderId} for ${formattedSymbol}`);
+    
+    const response = await fetch("https://www.okx.com/api/v5/trade/cancel-order", {
+      method: "POST",
+      headers: {
+        "OK-ACCESS-KEY": credentials.apiKey,
+        "OK-ACCESS-SIGN": signature,
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": credentials.passphrase || "",
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+    
+    const data = await response.json();
+    
+    if (data.code !== "0") {
+      // Order might already be filled
+      if (data.code === "51400" || data.code === "51401") {
+        console.log(`[OKX] Order ${orderId} not found - may already be filled`);
+        return { success: true };
+      }
+      console.error(`[OKX] Cancel failed:`, data);
+      return { success: false, error: data.msg || `API error: ${data.code}` };
+    }
+    
+    console.log(`[OKX] Order cancelled: ${orderId}`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[OKX] Cancel exception:`, error);
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+  }
+}
+
+// ============================================
+// BYBIT - CANCEL ORDER
+// ============================================
+async function cancelBybitOrder(
+  credentials: ExchangeCredentials,
+  symbol: string,
+  orderId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const timestamp = Date.now().toString();
+    const recvWindow = "5000";
+    const formattedSymbol = formatSymbol(symbol, "bybit");
+    
+    const body = JSON.stringify({
+      category: "spot",
+      symbol: formattedSymbol,
+      orderId: orderId,
+    });
+    
+    const preHash = timestamp + credentials.apiKey + recvWindow + body;
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(preHash)
+      .digest("hex");
+    
+    console.log(`[Bybit] Cancelling order: ${orderId} for ${formattedSymbol}`);
+    
+    const response = await fetch("https://api.bybit.com/v5/order/cancel", {
+      method: "POST",
+      headers: {
+        "X-BAPI-API-KEY": credentials.apiKey,
+        "X-BAPI-SIGN": signature,
+        "X-BAPI-TIMESTAMP": timestamp,
+        "X-BAPI-RECV-WINDOW": recvWindow,
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+    
+    const data = await response.json();
+    
+    if (data.retCode !== 0) {
+      // Order might already be filled
+      if (data.retCode === 110001) {
+        console.log(`[Bybit] Order ${orderId} not found - may already be filled`);
+        return { success: true };
+      }
+      console.error(`[Bybit] Cancel failed:`, data);
+      return { success: false, error: data.retMsg || `API error: ${data.retCode}` };
+    }
+    
+    console.log(`[Bybit] Order cancelled: ${orderId}`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[Bybit] Cancel exception:`, error);
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+  }
+}
+
+// ============================================
+// UNIFIED ORDER CANCELLATION
+// ============================================
 async function cancelExchangeOrder(
-  exchange: { exchange: string; api_key_encrypted: string | null; api_secret_encrypted: string | null },
+  exchange: { 
+    exchange: string; 
+    api_key_encrypted: string | null; 
+    api_secret_encrypted: string | null;
+    passphrase_encrypted: string | null;
+  },
+  symbol: string,
   orderId: string,
   isPaperTrade: boolean
-): Promise<boolean> {
+): Promise<{ success: boolean; error?: string }> {
   console.log(`[${exchange.exchange}] Cancelling order: ${orderId}`);
   
-  if (isPaperTrade) {
-    // For paper trading, just return success
-    return true;
+  // Paper trading - just return success
+  if (isPaperTrade || orderId.startsWith("TP-PAPER-") || orderId.startsWith("TP-SIM-")) {
+    console.log(`[PAPER] Simulated cancel for ${orderId}`);
+    return { success: true };
   }
   
-  // For live trading, this would call the actual exchange API
-  // TODO: Implement actual exchange API calls for live trading
-  return true;
+  // Check if we have API credentials
+  if (!exchange.api_key_encrypted || !exchange.api_secret_encrypted) {
+    console.log(`[${exchange.exchange}] No API credentials - treating as paper trade cancel`);
+    return { success: true };
+  }
+  
+  const credentials: ExchangeCredentials = {
+    exchange: exchange.exchange,
+    apiKey: exchange.api_key_encrypted,
+    apiSecret: exchange.api_secret_encrypted,
+    passphrase: exchange.passphrase_encrypted || undefined,
+  };
+  
+  switch (exchange.exchange) {
+    case "binance":
+      return await cancelBinanceOrder(credentials, symbol, orderId);
+    case "okx":
+      return await cancelOKXOrder(credentials, symbol, orderId);
+    case "bybit":
+      return await cancelBybitOrder(credentials, symbol, orderId);
+    default:
+      console.log(`[${exchange.exchange}] Exchange not supported for live cancel`);
+      return { success: true };
+  }
 }
 
 serve(async (req) => {
@@ -48,7 +267,6 @@ serve(async (req) => {
       .single();
 
     if (claimError || !position) {
-      // Position was already closed or doesn't exist - return success (idempotent)
       console.log("Position already closed or not found:", positionId);
       return new Response(JSON.stringify({
         success: true,
@@ -71,7 +289,16 @@ serve(async (req) => {
       console.log(`Cancelling take-profit order: ${position.take_profit_order_id}`);
       
       if (exchange) {
-        await cancelExchangeOrder(exchange, position.take_profit_order_id, position.is_paper_trade || true);
+        const cancelResult = await cancelExchangeOrder(
+          exchange, 
+          position.symbol,
+          position.take_profit_order_id, 
+          position.is_paper_trade || true
+        );
+        
+        if (!cancelResult.success) {
+          console.warn(`Failed to cancel TP order: ${cancelResult.error}`);
+        }
       }
       
       // Update TP status to cancelled
@@ -81,16 +308,12 @@ serve(async (req) => {
         .eq("id", positionId);
     }
 
-    // Use requested exit price if provided (for automated closes), otherwise use current price
-    // For automated closes with requireProfit=true, we use the exact price from frontend
-    // to ensure the profit calculation matches what triggered the close
     const exitPrice = requestedExitPrice || position.current_price || position.entry_price;
 
     // Calculate fees
     const feeRate = position.trade_type === "spot" ? 0.001 : 0.0005;
     const exitFee = position.order_size_usd * feeRate;
     
-    // Get entry fee from trade
     const { data: trade } = await supabase
       .from("trades")
       .select("entry_fee")
@@ -112,7 +335,6 @@ serve(async (req) => {
 
     // CRITICAL: If requireProfit is true, verify the position is profitable before closing
     if (requireProfit && netProfit < 0) {
-      // Revert the position back to 'open' since we can't close at a loss
       await supabase
         .from("positions")
         .update({ 
@@ -133,6 +355,10 @@ serve(async (req) => {
       });
     }
 
+    // Determine if TP was filled (position closed at profit)
+    const tpFilled = netProfit >= (position.profit_target || 0);
+    const now = new Date().toISOString();
+
     // Update trade record
     const { error: updateTradeError } = await supabase
       .from("trades")
@@ -143,7 +369,8 @@ serve(async (req) => {
         gross_profit: grossProfit,
         net_profit: netProfit,
         status: "closed",
-        closed_at: new Date().toISOString(),
+        closed_at: now,
+        tp_filled_at: tpFilled ? now : null,
       })
       .eq("id", position.trade_id);
 
@@ -157,9 +384,10 @@ serve(async (req) => {
         unrealized_pnl: netProfit,
         status: "closed",
         take_profit_status: position.take_profit_order_id 
-          ? (netProfit >= (position.profit_target || 0) ? "filled" : "cancelled")
+          ? (tpFilled ? "filled" : "cancelled")
           : null,
-        updated_at: new Date().toISOString(),
+        take_profit_filled_at: tpFilled ? now : null,
+        updated_at: now,
       })
       .eq("id", positionId);
 
@@ -202,17 +430,18 @@ serve(async (req) => {
 
     // Create notification
     const profitEmoji = netProfit > 0 ? "🎉" : "📉";
+    const liveIndicator = !position.is_paper_trade ? "🔴" : "📝";
     await supabase
       .from("notifications")
       .insert({
         user_id: position.user_id,
         type: netProfit > 0 ? "profit_target_hit" : "trade_closed",
-        title: `${profitEmoji} ${position.symbol} Closed`,
-        message: `${position.direction.toUpperCase()} position closed at $${exitPrice.toFixed(4)}. ${netProfit >= 0 ? "Profit" : "Loss"}: $${netProfit.toFixed(2)}`,
+        title: `${liveIndicator} ${profitEmoji} ${position.symbol} Closed`,
+        message: `${position.direction.toUpperCase()} position closed at $${exitPrice.toFixed(4)}. ${netProfit >= 0 ? "Profit" : "Loss"}: $${netProfit.toFixed(2)}${tpFilled ? " (TP Hit!)" : ""}`,
         trade_id: position.trade_id,
       });
 
-    console.log("Position closed. Net P&L:", netProfit.toFixed(2));
+    console.log("Position closed. Net P&L:", netProfit.toFixed(2), "| TP Filled:", tpFilled);
 
     return new Response(JSON.stringify({
       success: true,
@@ -225,8 +454,9 @@ serve(async (req) => {
         exitFee,
         fundingFee,
         takeProfitStatus: position.take_profit_order_id 
-          ? (netProfit >= (position.profit_target || 0) ? "filled" : "cancelled")
+          ? (tpFilled ? "filled" : "cancelled")
           : null,
+        takeProfitFilled: tpFilled,
       },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
