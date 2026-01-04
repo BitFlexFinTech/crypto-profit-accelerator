@@ -37,7 +37,6 @@ import { SignalDebugPanel } from '@/components/dashboard/cards/SignalDebugPanel'
 export default function AnalyticsPage() {
   const { trades, positions, balances, signals, engineMetrics, isEngineRunning } = useTrading();
 
-  // Calculate stats
   const totalTrades = trades.length;
   const winningTrades = trades.filter(t => (t.net_profit || 0) > 0).length;
   const losingTrades = trades.filter(t => (t.net_profit || 0) < 0).length;
@@ -47,7 +46,6 @@ export default function AnalyticsPage() {
   const avgTradeProfit = totalTrades > 0 ? totalProfit / totalTrades : 0;
   const totalBalance = balances.reduce((sum, b) => sum + b.total, 0);
 
-  // Generate chart data
   const profitByDay = trades.reduce((acc, trade) => {
     const date = format(new Date(trade.created_at || Date.now()), 'MMM dd');
     if (!acc[date]) acc[date] = { date, profit: 0, trades: 0 };
@@ -58,7 +56,6 @@ export default function AnalyticsPage() {
 
   const dailyData = Object.values(profitByDay).slice(-14);
 
-  // Direction distribution
   const longTrades = trades.filter(t => t.direction === 'long').length;
   const shortTrades = trades.filter(t => t.direction === 'short').length;
   const directionData = [
@@ -66,7 +63,6 @@ export default function AnalyticsPage() {
     { name: 'Short', value: shortTrades, color: 'hsl(var(--destructive))' },
   ];
 
-  // Trade type distribution
   const spotTrades = trades.filter(t => t.trade_type === 'spot').length;
   const futuresTrades = trades.filter(t => t.trade_type === 'futures').length;
   const typeData = [
@@ -74,7 +70,6 @@ export default function AnalyticsPage() {
     { name: 'Futures', value: futuresTrades, color: 'hsl(var(--warning))' },
   ];
 
-  // Cumulative P&L
   let cumulative = 0;
   const cumulativeData = trades
     .slice()
@@ -89,35 +84,37 @@ export default function AnalyticsPage() {
     .slice(-50);
 
   const stats = [
-    { title: 'Total Balance', value: `$${totalBalance.toFixed(2)}`, icon: DollarSign, color: 'text-primary' },
-    { title: 'Total Profit', value: `${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}`, icon: totalProfit >= 0 ? TrendingUp : TrendingDown, color: totalProfit >= 0 ? 'text-primary' : 'text-destructive' },
-    { title: 'Win Rate', value: `${winRate.toFixed(1)}%`, icon: Target, color: winRate >= 50 ? 'text-primary' : 'text-warning' },
-    { title: 'Total Trades', value: totalTrades.toString(), icon: Activity, color: 'text-foreground' },
-    { title: 'Avg Profit/Trade', value: `$${avgTradeProfit.toFixed(2)}`, icon: BarChart3, color: avgTradeProfit >= 0 ? 'text-primary' : 'text-destructive' },
-    { title: 'Total Fees', value: `$${totalFees.toFixed(2)}`, icon: Clock, color: 'text-muted-foreground' },
+    { title: 'Balance', value: `$${totalBalance.toFixed(0)}`, icon: DollarSign, color: 'text-primary' },
+    { title: 'Profit', value: `${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}`, icon: totalProfit >= 0 ? TrendingUp : TrendingDown, color: totalProfit >= 0 ? 'text-primary' : 'text-destructive' },
+    { title: 'Win Rate', value: `${winRate.toFixed(0)}%`, icon: Target, color: winRate >= 50 ? 'text-primary' : 'text-warning' },
+    { title: 'Trades', value: totalTrades.toString(), icon: Activity, color: 'text-foreground' },
+    { title: 'Avg/Trade', value: `$${avgTradeProfit.toFixed(2)}`, icon: BarChart3, color: avgTradeProfit >= 0 ? 'text-primary' : 'text-destructive' },
+    { title: 'Fees', value: `$${totalFees.toFixed(2)}`, icon: Clock, color: 'text-muted-foreground' },
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex-shrink-0 px-4 pt-4 pb-2">
-        <h1 className="text-2xl font-bold text-foreground">Bot Analytics</h1>
-        <p className="text-muted-foreground text-sm">Comprehensive trading performance analysis</p>
+    <div className="h-screen flex flex-col overflow-hidden bg-background">
+      {/* Fixed Header */}
+      <div className="flex-shrink-0 h-12 border-b border-border px-3 flex items-center bg-card/50">
+        <div>
+          <h1 className="text-lg font-bold text-foreground">Bot Analytics</h1>
+          <p className="text-xs text-muted-foreground">Performance analysis</p>
+        </div>
       </div>
 
       {/* Stats Grid - Fixed */}
-      <div className="flex-shrink-0 px-4 pb-3">
-        <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+      <div className="flex-shrink-0 px-3 py-2">
+        <div className="grid gap-2 grid-cols-3 lg:grid-cols-6">
           {stats.map((stat, i) => (
             <Card key={i} className="bg-card border-border">
-              <CardContent className="pt-3 pb-2">
-                <div className="flex items-center gap-2">
-                  <div className={cn("p-1.5 rounded-lg bg-secondary")}>
-                    <stat.icon className={cn("h-3.5 w-3.5", stat.color)} />
+              <CardContent className="p-2">
+                <div className="flex items-center gap-1.5">
+                  <div className={cn("p-1 rounded bg-secondary")}>
+                    <stat.icon className={cn("h-3 w-3", stat.color)} />
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">{stat.title}</p>
-                    <p className={cn("text-sm font-bold", stat.color)}>{stat.value}</p>
+                    <p className="text-[10px] text-muted-foreground">{stat.title}</p>
+                    <p className={cn("text-xs font-bold", stat.color)}>{stat.value}</p>
                   </div>
                 </div>
               </CardContent>
@@ -127,19 +124,19 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Tabs - Fills remaining space */}
-      <div className="flex-1 overflow-hidden px-4 pb-4">
+      <div className="flex-1 overflow-hidden px-3 pb-2 min-h-0">
         <Tabs defaultValue="performance" className="h-full flex flex-col">
-          <TabsList className="bg-secondary flex-shrink-0">
-            <TabsTrigger value="performance">Performance</TabsTrigger>
-            <TabsTrigger value="signals">Signals & TP</TabsTrigger>
-            <TabsTrigger value="connections">Connections</TabsTrigger>
-            <TabsTrigger value="distribution">Distribution</TabsTrigger>
+          <TabsList className="bg-secondary flex-shrink-0 h-8">
+            <TabsTrigger value="performance" className="text-xs h-7">Performance</TabsTrigger>
+            <TabsTrigger value="signals" className="text-xs h-7">Signals</TabsTrigger>
+            <TabsTrigger value="connections" className="text-xs h-7">Engine</TabsTrigger>
+            <TabsTrigger value="distribution" className="text-xs h-7">Charts</TabsTrigger>
           </TabsList>
 
-          <div className="flex-1 overflow-hidden mt-4">
+          <div className="flex-1 overflow-hidden mt-2 min-h-0">
             <TabsContent value="performance" className="h-full m-0 overflow-hidden">
               <ScrollArea className="h-full">
-                <div className="space-y-4 pr-4">
+                <div className="space-y-3 pr-3">
                   <TradePerformancePanel />
                   <PairPerformanceLeaderboard />
                 </div>
@@ -148,7 +145,7 @@ export default function AnalyticsPage() {
 
             <TabsContent value="signals" className="h-full m-0 overflow-hidden">
               <ScrollArea className="h-full">
-                <div className="space-y-4 pr-4">
+                <div className="space-y-3 pr-3">
                   <TakeProfitStatusPanel />
                   <SignalDebugPanel />
                 </div>
@@ -157,35 +154,35 @@ export default function AnalyticsPage() {
 
             <TabsContent value="connections" className="h-full m-0 overflow-hidden">
               <ScrollArea className="h-full">
-                <div className="space-y-4 pr-4">
+                <div className="space-y-3 pr-3">
                   <div className="max-w-xl">
                     <WebSocketStatusPanel />
                   </div>
                   
                   <Card className="bg-card border-border">
-                    <CardHeader>
-                      <CardTitle className="text-sm font-medium flex items-center gap-2">
-                        <Wifi className="h-4 w-4 text-primary" />
+                    <CardHeader className="py-2 px-3">
+                      <CardTitle className="text-xs font-medium flex items-center gap-1.5">
+                        <Wifi className="h-3 w-3 text-primary" />
                         Engine Performance
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="p-4 bg-secondary/50 rounded-lg">
-                          <p className="text-xs text-muted-foreground">Analysis Time</p>
-                          <p className="text-xl font-bold">{engineMetrics.analysisTime}ms</p>
+                    <CardContent className="p-3 pt-0">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div className="p-2 bg-secondary/50 rounded text-center">
+                          <p className="text-[10px] text-muted-foreground">Analysis</p>
+                          <p className="text-sm font-bold">{engineMetrics.analysisTime}ms</p>
                         </div>
-                        <div className="p-4 bg-secondary/50 rounded-lg">
-                          <p className="text-xs text-muted-foreground">Execution Time</p>
-                          <p className="text-xl font-bold">{engineMetrics.executionTime}ms</p>
+                        <div className="p-2 bg-secondary/50 rounded text-center">
+                          <p className="text-[10px] text-muted-foreground">Execution</p>
+                          <p className="text-sm font-bold">{engineMetrics.executionTime}ms</p>
                         </div>
-                        <div className="p-4 bg-secondary/50 rounded-lg">
-                          <p className="text-xs text-muted-foreground">Cycle Time</p>
-                          <p className="text-xl font-bold">{engineMetrics.cycleTime}ms</p>
+                        <div className="p-2 bg-secondary/50 rounded text-center">
+                          <p className="text-[10px] text-muted-foreground">Cycle</p>
+                          <p className="text-sm font-bold">{engineMetrics.cycleTime}ms</p>
                         </div>
-                        <div className="p-4 bg-secondary/50 rounded-lg">
-                          <p className="text-xs text-muted-foreground">Trades/Hour</p>
-                          <p className="text-xl font-bold">{engineMetrics.tradesPerHour.toFixed(1)}</p>
+                        <div className="p-2 bg-secondary/50 rounded text-center">
+                          <p className="text-[10px] text-muted-foreground">Trades/Hr</p>
+                          <p className="text-sm font-bold">{engineMetrics.tradesPerHour.toFixed(1)}</p>
                         </div>
                       </div>
                     </CardContent>
@@ -196,26 +193,18 @@ export default function AnalyticsPage() {
 
             <TabsContent value="distribution" className="h-full m-0 overflow-hidden">
               <ScrollArea className="h-full">
-                <div className="space-y-4 pr-4">
-                  <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-3 pr-3">
+                  <div className="grid gap-3 md:grid-cols-2">
                     {/* Direction Distribution */}
                     <Card className="bg-card border-border">
-                      <CardHeader>
-                        <CardTitle className="text-sm font-medium">Trade Direction</CardTitle>
+                      <CardHeader className="py-2 px-3">
+                        <CardTitle className="text-xs font-medium">Direction</CardTitle>
                       </CardHeader>
-                      <CardContent>
-                        <div className="h-[200px] flex items-center justify-center">
+                      <CardContent className="p-2">
+                        <div className="h-32 flex items-center justify-center">
                           <ResponsiveContainer width="100%" height="100%">
                             <RechartsPie>
-                              <Pie
-                                data={directionData}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={50}
-                                outerRadius={80}
-                                paddingAngle={5}
-                                dataKey="value"
-                              >
+                              <Pie data={directionData} cx="50%" cy="50%" innerRadius={35} outerRadius={55} paddingAngle={5} dataKey="value">
                                 {directionData.map((entry, index) => (
                                   <Cell key={`cell-${index}`} fill={entry.color} />
                                 ))}
@@ -224,11 +213,11 @@ export default function AnalyticsPage() {
                             </RechartsPie>
                           </ResponsiveContainer>
                         </div>
-                        <div className="flex justify-center gap-6 mt-4">
+                        <div className="flex justify-center gap-4 mt-2">
                           {directionData.map((item) => (
-                            <div key={item.name} className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-                              <span className="text-sm">{item.name}: {item.value}</span>
+                            <div key={item.name} className="flex items-center gap-1.5 text-xs">
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                              {item.name}: {item.value}
                             </div>
                           ))}
                         </div>
@@ -237,22 +226,14 @@ export default function AnalyticsPage() {
 
                     {/* Trade Type Distribution */}
                     <Card className="bg-card border-border">
-                      <CardHeader>
-                        <CardTitle className="text-sm font-medium">Trade Type</CardTitle>
+                      <CardHeader className="py-2 px-3">
+                        <CardTitle className="text-xs font-medium">Type</CardTitle>
                       </CardHeader>
-                      <CardContent>
-                        <div className="h-[200px] flex items-center justify-center">
+                      <CardContent className="p-2">
+                        <div className="h-32 flex items-center justify-center">
                           <ResponsiveContainer width="100%" height="100%">
                             <RechartsPie>
-                              <Pie
-                                data={typeData}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={50}
-                                outerRadius={80}
-                                paddingAngle={5}
-                                dataKey="value"
-                              >
+                              <Pie data={typeData} cx="50%" cy="50%" innerRadius={35} outerRadius={55} paddingAngle={5} dataKey="value">
                                 {typeData.map((entry, index) => (
                                   <Cell key={`cell-${index}`} fill={entry.color} />
                                 ))}
@@ -261,11 +242,11 @@ export default function AnalyticsPage() {
                             </RechartsPie>
                           </ResponsiveContainer>
                         </div>
-                        <div className="flex justify-center gap-6 mt-4">
+                        <div className="flex justify-center gap-4 mt-2">
                           {typeData.map((item) => (
-                            <div key={item.name} className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-                              <span className="text-sm">{item.name}: {item.value}</span>
+                            <div key={item.name} className="flex items-center gap-1.5 text-xs">
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                              {item.name}: {item.value}
                             </div>
                           ))}
                         </div>
@@ -275,22 +256,22 @@ export default function AnalyticsPage() {
 
                   {/* Win/Loss Breakdown */}
                   <Card className="bg-card border-border">
-                    <CardHeader>
-                      <CardTitle className="text-sm font-medium">Win/Loss Breakdown</CardTitle>
+                    <CardHeader className="py-2 px-3">
+                      <CardTitle className="text-xs font-medium">Win/Loss</CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-3 gap-4 text-center">
-                        <div className="p-4 bg-primary/10 rounded-lg">
-                          <p className="text-2xl font-bold text-primary">{winningTrades}</p>
-                          <p className="text-sm text-muted-foreground">Winning</p>
+                    <CardContent className="p-2">
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="p-2 bg-primary/10 rounded">
+                          <p className="text-lg font-bold text-primary">{winningTrades}</p>
+                          <p className="text-[10px] text-muted-foreground">Win</p>
                         </div>
-                        <div className="p-4 bg-destructive/10 rounded-lg">
-                          <p className="text-2xl font-bold text-destructive">{losingTrades}</p>
-                          <p className="text-sm text-muted-foreground">Losing</p>
+                        <div className="p-2 bg-destructive/10 rounded">
+                          <p className="text-lg font-bold text-destructive">{losingTrades}</p>
+                          <p className="text-[10px] text-muted-foreground">Loss</p>
                         </div>
-                        <div className="p-4 bg-secondary rounded-lg">
-                          <p className="text-2xl font-bold">{totalTrades - winningTrades - losingTrades}</p>
-                          <p className="text-sm text-muted-foreground">Breakeven</p>
+                        <div className="p-2 bg-secondary rounded">
+                          <p className="text-lg font-bold">{totalTrades - winningTrades - losingTrades}</p>
+                          <p className="text-[10px] text-muted-foreground">Even</p>
                         </div>
                       </div>
                     </CardContent>
@@ -298,11 +279,11 @@ export default function AnalyticsPage() {
 
                   {/* Cumulative P&L Chart */}
                   <Card className="bg-card border-border">
-                    <CardHeader>
-                      <CardTitle className="text-sm font-medium">Cumulative P&L</CardTitle>
+                    <CardHeader className="py-2 px-3">
+                      <CardTitle className="text-xs font-medium">Cumulative P&L</CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <div className="h-[250px]">
+                    <CardContent className="p-2">
+                      <div className="h-40">
                         <ResponsiveContainer width="100%" height="100%">
                           <AreaChart data={cumulativeData}>
                             <defs>
@@ -312,53 +293,11 @@ export default function AnalyticsPage() {
                               </linearGradient>
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                            <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                            <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                            <Tooltip
-                              contentStyle={{
-                                backgroundColor: 'hsl(var(--card))',
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '8px',
-                              }}
-                            />
-                            <Area
-                              type="monotone"
-                              dataKey="pnl"
-                              stroke="hsl(var(--primary))"
-                              fill="url(#pnlGradient)"
-                              strokeWidth={2}
-                            />
+                            <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={10} />
+                            <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
+                            <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '6px', fontSize: '12px' }} />
+                            <Area type="monotone" dataKey="pnl" stroke="hsl(var(--primary))" fill="url(#pnlGradient)" strokeWidth={2} />
                           </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* Daily P&L Chart */}
-                  <Card className="bg-card border-border">
-                    <CardHeader>
-                      <CardTitle className="text-sm font-medium">Daily Performance</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-[200px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={dailyData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                            <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                            <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                            <Tooltip
-                              contentStyle={{
-                                backgroundColor: 'hsl(var(--card))',
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '8px',
-                              }}
-                            />
-                            <Bar
-                              dataKey="profit"
-                              fill="hsl(var(--primary))"
-                              radius={[4, 4, 0, 0]}
-                            />
-                          </BarChart>
                         </ResponsiveContainer>
                       </div>
                     </CardContent>

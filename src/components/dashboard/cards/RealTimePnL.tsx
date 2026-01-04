@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { TrendingUp, TrendingDown, Activity, Trophy, Target, Clock } from 'lucide-react';
+import { TrendingUp, TrendingDown, Activity, Trophy, Target } from 'lucide-react';
 import { useTrades } from '@/hooks/useTrades';
 import { cn } from '@/lib/utils';
 import { LiveBadge } from '@/components/ui/live-badge';
@@ -43,7 +42,7 @@ export function RealTimePnL() {
     if (todayStats.totalPnL !== prevPnL) {
       setIsAnimating(true);
       const diff = todayStats.totalPnL - animatedPnL;
-      const steps = 20;
+      const steps = 15;
       const stepValue = diff / steps;
       let step = 0;
 
@@ -54,9 +53,9 @@ export function RealTimePnL() {
           clearInterval(interval);
           setAnimatedPnL(todayStats.totalPnL);
           setPrevPnL(todayStats.totalPnL);
-          setTimeout(() => setIsAnimating(false), 200);
+          setTimeout(() => setIsAnimating(false), 150);
         }
-      }, 25);
+      }, 20);
 
       return () => clearInterval(interval);
     }
@@ -66,9 +65,9 @@ export function RealTimePnL() {
 
   if (loading) {
     return (
-      <Card className="col-span-2 h-[200px]">
+      <Card className="h-full overflow-hidden flex flex-col">
         <CardContent className="flex items-center justify-center h-full">
-          <Activity className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Activity className="h-5 w-5 animate-spin text-muted-foreground" />
         </CardContent>
       </Card>
     );
@@ -76,78 +75,78 @@ export function RealTimePnL() {
 
   return (
     <Card className="h-full overflow-hidden flex flex-col">
-      <CardHeader className="py-2 px-3">
+      <CardHeader className="py-1.5 px-2 flex-shrink-0">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Activity className="h-4 w-4 text-primary" />
+          <CardTitle className="text-xs flex items-center gap-1.5">
+            <Activity className="h-3 w-3 text-primary" />
             Today's P&L
           </CardTitle>
           <LiveBadge />
         </div>
       </CardHeader>
-      <CardContent className="p-3 pt-0 space-y-3">
+      <CardContent className="flex-1 p-2 pt-0 flex flex-col justify-between min-h-0">
         {/* Main P&L Display */}
         <div className="flex items-center justify-between">
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <div className={cn(
-              "text-2xl font-bold transition-all duration-300 tabular-nums",
+              "text-xl font-bold transition-all duration-200 tabular-nums",
               isProfit ? "text-primary" : "text-destructive",
               isAnimating && "scale-105"
             )}>
               {isProfit ? '+' : ''}{animatedPnL.toFixed(2)} USDT
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
               {isProfit ? (
-                <TrendingUp className="h-3 w-3 text-primary" />
+                <TrendingUp className="h-2.5 w-2.5 text-primary" />
               ) : (
-                <TrendingDown className="h-3 w-3 text-destructive" />
+                <TrendingDown className="h-2.5 w-2.5 text-destructive" />
               )}
               {todayStats.tradeCount} trades today
             </div>
           </div>
           
           {/* Win Rate Circle */}
-          <div className="relative w-14 h-14">
-            <svg className="w-14 h-14 transform -rotate-90">
-              <circle cx="28" cy="28" r="24" stroke="currentColor" strokeWidth="4" fill="none" className="text-muted" />
-              <circle cx="28" cy="28" r="24" stroke="currentColor" strokeWidth="4" fill="none"
-                strokeDasharray={`${todayStats.winRate * 1.5} 150`}
+          <div className="relative w-12 h-12 flex-shrink-0">
+            <svg className="w-12 h-12 transform -rotate-90">
+              <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="3" fill="none" className="text-muted" />
+              <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="3" fill="none"
+                strokeDasharray={`${todayStats.winRate * 1.25} 125`}
                 className="text-primary transition-all duration-500"
               />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-sm font-bold">{todayStats.winRate.toFixed(0)}%</span>
+              <span className="text-xs font-bold">{todayStats.winRate.toFixed(0)}%</span>
             </div>
           </div>
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-4 gap-2 pt-2 border-t border-border">
+        <div className="grid grid-cols-4 gap-1.5 pt-1.5 border-t border-border mt-auto">
           <div className="text-center">
-            <div className="flex items-center justify-center gap-1 text-primary font-semibold text-sm">
-              <Trophy className="h-3 w-3" />
+            <div className="flex items-center justify-center gap-0.5 text-primary font-semibold text-xs">
+              <Trophy className="h-2.5 w-2.5" />
               {todayStats.wins}
             </div>
-            <div className="text-[10px] text-muted-foreground">Wins</div>
+            <div className="text-[9px] text-muted-foreground">Wins</div>
           </div>
           <div className="text-center">
-            <div className="flex items-center justify-center gap-1 text-destructive font-semibold text-sm">
-              <Target className="h-3 w-3" />
+            <div className="flex items-center justify-center gap-0.5 text-destructive font-semibold text-xs">
+              <Target className="h-2.5 w-2.5" />
               {todayStats.losses}
             </div>
-            <div className="text-[10px] text-muted-foreground">Losses</div>
+            <div className="text-[9px] text-muted-foreground">Losses</div>
           </div>
           <div className="text-center">
-            <div className={cn("font-semibold text-sm tabular-nums", todayStats.avgProfit >= 0 ? "text-primary" : "text-destructive")}>
+            <div className={cn("font-semibold text-xs tabular-nums", todayStats.avgProfit >= 0 ? "text-primary" : "text-destructive")}>
               ${todayStats.avgProfit.toFixed(2)}
             </div>
-            <div className="text-[10px] text-muted-foreground">Avg Trade</div>
+            <div className="text-[9px] text-muted-foreground">Avg</div>
           </div>
           <div className="text-center">
-            <div className="font-semibold text-sm text-primary tabular-nums">
+            <div className="font-semibold text-xs text-primary tabular-nums">
               ${todayStats.bestTrade.toFixed(2)}
             </div>
-            <div className="text-[10px] text-muted-foreground">Best</div>
+            <div className="text-[9px] text-muted-foreground">Best</div>
           </div>
         </div>
       </CardContent>

@@ -4,46 +4,51 @@ import { ExchangeBreakdown } from '@/components/portfolio/ExchangeBreakdown';
 import { HoldingsTable } from '@/components/portfolio/HoldingsTable';
 import { AllocationChart } from '@/components/portfolio/AllocationChart';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 export default function PortfolioPage() {
   const { loading } = useTrading();
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
+      <div className="h-screen flex flex-col overflow-hidden">
+        <div className="flex-shrink-0 h-12 border-b border-border px-4 flex items-center">
+          <Skeleton className="h-6 w-48" />
         </div>
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Skeleton className="h-80" />
-          <Skeleton className="h-80" />
+        <div className="flex-1 p-4 space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {[...Array(4)].map((_, i) => (
+              <Skeleton key={i} className="h-24" />
+            ))}
+          </div>
         </div>
-        <Skeleton className="h-96" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Portfolio Holdings</h1>
-        <p className="text-muted-foreground">Real-time view of your trading portfolio across all exchanges</p>
+    <div className="h-screen flex flex-col overflow-hidden bg-background">
+      {/* Fixed Header */}
+      <div className="flex-shrink-0 h-12 border-b border-border px-4 flex items-center bg-card/50">
+        <div>
+          <h1 className="text-lg font-bold text-foreground">Portfolio Holdings</h1>
+          <p className="text-xs text-muted-foreground">Real-time portfolio across all exchanges</p>
+        </div>
       </div>
       
-      {/* Summary Cards */}
-      <PortfolioSummary />
-      
-      {/* Charts Row */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ExchangeBreakdown />
-        <AllocationChart />
-      </div>
-      
-      {/* Holdings Table */}
-      <HoldingsTable />
+      {/* Scrollable Content */}
+      <ScrollArea className="flex-1">
+        <div className="p-4 space-y-4">
+          <PortfolioSummary />
+          
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ExchangeBreakdown />
+            <AllocationChart />
+          </div>
+          
+          <HoldingsTable />
+        </div>
+      </ScrollArea>
     </div>
   );
 }
