@@ -10,7 +10,9 @@ import {
   PieChart,
   Wallet,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Shield,
+  LineChart
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -22,6 +24,8 @@ const navItems = [
   { path: '/charts', label: 'Charts', icon: BarChart3 },
   { path: '/positions', label: 'Positions', icon: TrendingUp },
   { path: '/history', label: 'History', icon: History },
+  { path: '/risk-management', label: 'Risk', icon: Shield },
+  { path: '/trade-analytics', label: 'Trade Stats', icon: LineChart },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
