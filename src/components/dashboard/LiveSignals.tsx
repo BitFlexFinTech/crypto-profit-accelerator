@@ -3,13 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, TrendingDown, Zap, RefreshCw, Clock } from 'lucide-react';
+import { TrendingUp, TrendingDown, Zap, RefreshCw, Clock, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatDistanceToNow } from 'date-fns';
 
 export function LiveSignals() {
-  const { signals, engineStatus, forceAnalyze } = useTrading();
+  const { signals, engineStatus, forceAnalyze, isScanning, engineMetrics } = useTrading();
   
-  const isAnalyzing = engineStatus === 'analyzing';
+  const isAnalyzing = engineStatus === 'analyzing' || isScanning;
 
   const handleRefresh = async () => {
     try {
@@ -42,7 +43,18 @@ export function LiveSignals() {
           <CardTitle className="text-foreground flex items-center gap-2">
             <Zap className="h-5 w-5 text-primary" />
             Live Trading Signals
+            {isScanning && (
+              <Badge variant="outline" className="gap-1 text-xs">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Scanning
+              </Badge>
+            )}
           </CardTitle>
+          {engineMetrics.lastScanTime && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Last updated: {formatDistanceToNow(engineMetrics.lastScanTime, { addSuffix: true })}
+            </p>
+          )}
         </div>
         <Button 
           variant="outline" 
@@ -55,7 +67,7 @@ export function LiveSignals() {
         </Button>
       </CardHeader>
       <CardContent>
-        {isAnalyzing ? (
+        {isAnalyzing && signals.length === 0 ? (
           <div className="space-y-3">
             <Skeleton className="h-20" />
             <Skeleton className="h-20" />
@@ -65,7 +77,7 @@ export function LiveSignals() {
           <div className="text-center py-8 text-muted-foreground">
             <Zap className="h-12 w-12 mx-auto mb-3 opacity-50" />
             <p>No signals available</p>
-            <p className="text-sm mt-1">Start the bot to begin analyzing pairs</p>
+            <p className="text-sm mt-1">AI is scanning markets every 30 seconds</p>
           </div>
         ) : (
           <div className="space-y-3">

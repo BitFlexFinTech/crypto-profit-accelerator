@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Position, Exchange, Balance, BotSettings, Trade } from '@/types/trading';
 import { rateLimiter } from '@/services/RateLimiter';
 import { invokeWithRetry } from '@/utils/retryWithBackoff';
+import { fetchAllPrices } from '@/services/PriceFetcher';
 
 type ExchangeName = 'binance' | 'okx' | 'nexo' | 'bybit' | 'kucoin' | 'hyperliquid';
 
@@ -27,6 +28,7 @@ interface ConnectionState {
   latency: number;
   status: 'connected' | 'connecting' | 'disconnected' | 'error';
   reconnectAttempts: number;
+  usingRestFallback?: boolean;
 }
 
 interface EngineMetrics {
@@ -35,6 +37,7 @@ interface EngineMetrics {
   executionTime: number;
   tradesPerHour: number;
   successRate: number;
+  lastScanTime: Date | null;
 }
 
 interface MarketData {
@@ -63,9 +66,10 @@ interface TradingContextType {
   connectionStates: Record<string, ConnectionState>;
   
   // Engine state
-  engineStatus: 'idle' | 'analyzing' | 'trading' | 'monitoring' | 'error';
+  engineStatus: 'idle' | 'analyzing' | 'trading' | 'monitoring' | 'scanning' | 'error';
   engineMetrics: EngineMetrics;
   isEngineRunning: boolean;
+  isScanning: boolean;
   
   // Loading states
   loading: boolean;
@@ -94,6 +98,8 @@ const DEFAULT_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/U
 const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY = 1000;
+const REST_FALLBACK_INTERVAL = 5000; // 5 seconds
+const BACKGROUND_SCAN_INTERVAL = 30000; // 30 seconds
 
 export function TradingProvider({ children }: { children: ReactNode }) {
   // Core state
@@ -110,15 +116,17 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionState>>({});
   
   // Engine state
-  const [engineStatus, setEngineStatus] = useState<'idle' | 'analyzing' | 'trading' | 'monitoring' | 'error'>('idle');
+  const [engineStatus, setEngineStatus] = useState<'idle' | 'analyzing' | 'trading' | 'monitoring' | 'scanning' | 'error'>('idle');
   const [engineMetrics, setEngineMetrics] = useState<EngineMetrics>({
     cycleTime: 0,
     analysisTime: 0,
     executionTime: 0,
     tradesPerHour: 0,
     successRate: 0,
+    lastScanTime: null,
   });
   const [isEngineRunning, setIsEngineRunning] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   const [loading, setLoading] = useState(true);
   
   // Refs
@@ -126,9 +134,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const reconnectTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const tradingLoopRef = useRef<NodeJS.Timeout | null>(null);
   const healthCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const restFallbackRef = useRef<NodeJS.Timeout | null>(null);
+  const backgroundScanRef = useRef<NodeJS.Timeout | null>(null);
   const initialConnectionMade = useRef(false);
   const connectionStatesRef = useRef<Record<string, ConnectionState>>({});
   const hasAutoSynced = useRef(false);
+  const isRunningRef = useRef(false);
 
   // Fetch all data
   const fetchAllData = useCallback(async () => {
@@ -171,6 +182,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           daily_loss_limit: Number(settingsRes.data.daily_loss_limit),
         } as BotSettings);
         setIsEngineRunning(settingsRes.data.is_bot_running || false);
+        isRunningRef.current = settingsRes.data.is_bot_running || false;
       } else {
         // Create default settings
         const { data } = await supabase
@@ -197,6 +209,59 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, []);
+
+  // REST API fallback for fetching prices
+  const fetchPricesViaREST = useCallback(async () => {
+    try {
+      const priceData = await fetchAllPrices(DEFAULT_SYMBOLS);
+      
+      if (priceData.length > 0) {
+        const newPrices: Record<string, number> = {};
+        const newMarketData: Record<string, MarketData> = {};
+        
+        priceData.forEach(data => {
+          newPrices[data.symbol] = data.price;
+          newMarketData[data.symbol] = {
+            symbol: data.symbol,
+            price: data.price,
+            change24h: data.change24h,
+            volume24h: data.volume24h,
+            high24h: data.high24h,
+            low24h: data.low24h,
+            volatility: data.high24h && data.low24h ? ((data.high24h - data.low24h) / data.low24h) * 100 : 0,
+            lastUpdate: new Date(),
+          };
+        });
+        
+        setPrices(prev => ({ ...prev, ...newPrices }));
+        setMarketData(prev => ({ ...prev, ...newMarketData }));
+        
+        // Update connection state to show REST fallback is active
+        setConnectionStates(prev => ({
+          ...prev,
+          rest: { 
+            connected: true, 
+            lastPing: new Date(), 
+            latency: 0, 
+            status: 'connected' as const,
+            reconnectAttempts: 0,
+            usingRestFallback: true,
+          },
+        }));
+      }
+    } catch (error) {
+      console.error('REST fallback error:', error);
+    }
+  }, []);
+
+  // Start REST fallback polling
+  const startRestFallback = useCallback(() => {
+    if (restFallbackRef.current) return; // Already running
+    
+    console.log('Starting REST API fallback for price data...');
+    fetchPricesViaREST(); // Fetch immediately
+    restFallbackRef.current = setInterval(fetchPricesViaREST, REST_FALLBACK_INTERVAL);
+  }, [fetchPricesViaREST]);
 
   // WebSocket connection with reconnection logic
   const connectToExchange = useCallback((exchangeName: ExchangeName) => {
@@ -239,10 +304,20 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         }
       } catch (error) {
         console.error(`Failed to create WebSocket for ${exchangeName}:`, error);
+        startRestFallback();
         return;
       }
 
+      const connectionTimeout = setTimeout(() => {
+        if (ws.readyState !== WebSocket.OPEN) {
+          console.log(`WebSocket connection timeout for ${exchangeName}, using REST fallback`);
+          ws.close();
+          startRestFallback();
+        }
+      }, 10000);
+
       ws.onopen = () => {
+        clearTimeout(connectionTimeout);
         console.log(`${exchangeName} WebSocket connected`);
         setConnectionStates(prev => {
           const newState = {
@@ -337,6 +412,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       };
 
       ws.onerror = (error) => {
+        clearTimeout(connectionTimeout);
         console.error(`${exchangeName} WebSocket error:`, error);
         setConnectionStates(prev => {
           const newState = {
@@ -346,9 +422,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           connectionStatesRef.current = newState;
           return newState;
         });
+        // Start REST fallback on error
+        startRestFallback();
       };
 
       ws.onclose = () => {
+        clearTimeout(connectionTimeout);
         console.log(`${exchangeName} WebSocket closed`);
         
         // Use ref to get current state to avoid stale closure
@@ -375,7 +454,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           console.log(`Reconnecting to ${exchangeName} in ${delay}ms (attempt ${attempts})`);
           reconnectTimeouts.current[exchangeName] = setTimeout(() => connectWs(), delay);
         } else {
-          console.error(`Max reconnection attempts reached for ${exchangeName}`);
+          console.error(`Max reconnection attempts reached for ${exchangeName}, using REST fallback`);
           setConnectionStates(prev => {
             const newState = {
               ...prev,
@@ -384,6 +463,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             connectionStatesRef.current = newState;
             return newState;
           });
+          // Start REST fallback when all retries exhausted
+          startRestFallback();
         }
       };
 
@@ -391,28 +472,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     };
 
     connectWs();
-  }, []);
-
-  // Connect to all available exchanges on startup
-  const connectAllExchanges = useCallback(() => {
-    // Always connect to Binance for public price data (no API key required)
-    if (!wsRefs.current['binance']) {
-      connectToExchange('binance');
-    }
-    
-    // Connect to other exchanges that have API keys configured
-    exchanges.filter(e => e.is_connected && e.api_key_encrypted).forEach(exchange => {
-      const exchangeName = exchange.exchange as ExchangeName;
-      if (!wsRefs.current[exchangeName] && WS_ENDPOINTS[exchangeName]) {
-        connectToExchange(exchangeName);
-      }
-    });
-  }, [exchanges, connectToExchange]);
+  }, [startRestFallback]);
 
   // Health check for connections
   const runHealthCheck = useCallback(() => {
     const now = Date.now();
+    let anyConnected = false;
+    
     Object.entries(connectionStates).forEach(([exchange, state]) => {
+      if (state.connected) anyConnected = true;
+      
       if (state.lastPing && now - state.lastPing.getTime() > 30000 && state.status === 'connected') {
         console.log(`No ping from ${exchange} in 30 seconds, reconnecting...`);
         const ws = wsRefs.current[exchange];
@@ -421,7 +490,157 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         }
       }
     });
-  }, [connectionStates]);
+    
+    // If no WebSocket is connected and REST fallback isn't running, start it
+    if (!anyConnected && !restFallbackRef.current) {
+      startRestFallback();
+    }
+  }, [connectionStates, startRestFallback]);
+
+  // Background AI scanning (runs even when bot is stopped)
+  const runBackgroundScan = useCallback(async () => {
+    if (isScanning) return;
+    
+    setIsScanning(true);
+    const prevStatus = engineStatus;
+    setEngineStatus('scanning');
+    
+    try {
+      const connectedExchanges = exchanges.filter(e => e.is_connected).map(e => e.exchange);
+      if (connectedExchanges.length === 0) {
+        // No exchanges connected, but still update scan time
+        setEngineMetrics(prev => ({ ...prev, lastScanTime: new Date() }));
+        return;
+      }
+
+      const startTime = Date.now();
+      
+      const data = await invokeWithRetry(() => 
+        supabase.functions.invoke('analyze-pairs', {
+          body: {
+            exchanges: connectedExchanges,
+            mode: exchanges.some(e => e.futures_enabled) ? 'both' : 'spot',
+            aggressiveness: settings?.ai_aggressiveness || 'balanced',
+          },
+        })
+      );
+
+      const newSignals = data?.signals || [];
+      setSignals(newSignals);
+      setEngineMetrics(prev => ({
+        ...prev,
+        analysisTime: Date.now() - startTime,
+        lastScanTime: new Date(),
+      }));
+      
+      console.log(`Background scan complete: ${newSignals.length} signals found`);
+    } catch (error) {
+      console.error('Background scan error:', error);
+    } finally {
+      setIsScanning(false);
+      setEngineStatus(isEngineRunning ? 'monitoring' : 'idle');
+    }
+  }, [exchanges, settings, isScanning, isEngineRunning, engineStatus]);
+
+  // Trading loop - runs when bot is started
+  const runTradingLoop = useCallback(async () => {
+    if (!isRunningRef.current || !settings?.is_bot_running) return;
+    
+    try {
+      // Check positions for profit targets
+      for (const position of positions) {
+        const profitTarget = position.trade_type === 'futures'
+          ? settings.futures_profit_target
+          : settings.spot_profit_target;
+
+        if (position.unrealized_pnl >= profitTarget) {
+          console.log(`Position ${position.symbol} hit $${profitTarget} profit target, closing...`);
+          setEngineStatus('trading');
+          
+          try {
+            await invokeWithRetry(() => 
+              supabase.functions.invoke('close-position', { body: { positionId: position.id } })
+            );
+            setPositions(prev => prev.filter(p => p.id !== position.id));
+          } catch (err) {
+            console.error(`Failed to close position ${position.id}:`, err);
+          }
+        }
+      }
+
+      // Check if we're at max positions
+      if (positions.length >= (settings.max_open_positions || 10)) {
+        console.log('Max positions reached, monitoring only');
+        setEngineStatus('monitoring');
+        return;
+      }
+
+      // Get top signal and execute if conditions are met
+      if (signals.length > 0) {
+        const topSignal = signals[0];
+        
+        // Determine confidence threshold based on aggressiveness
+        const confidenceThreshold = settings.ai_aggressiveness === 'aggressive' ? 0.5 :
+                                   settings.ai_aggressiveness === 'conservative' ? 0.8 : 0.65;
+        
+        if (topSignal.confidence >= confidenceThreshold && topSignal.score >= 60) {
+          setEngineStatus('trading');
+          
+          // Find exchange
+          const exchange = exchanges.find(e => e.exchange === topSignal.exchange && e.is_connected);
+          if (!exchange) {
+            console.log(`Exchange ${topSignal.exchange} not connected`);
+            return;
+          }
+
+          // Calculate order size
+          const orderSize = Math.min(
+            Math.max(settings.min_order_size, 333),
+            settings.max_order_size
+          );
+
+          // Determine profit target
+          const profitTarget = topSignal.tradeType === 'futures' 
+            ? settings.futures_profit_target 
+            : settings.spot_profit_target;
+
+          console.log(`Executing trade: ${topSignal.direction} ${topSignal.symbol} @ ${topSignal.entryPrice}`);
+
+          try {
+            await invokeWithRetry(() => 
+              supabase.functions.invoke('execute-trade', {
+                body: {
+                  exchangeId: exchange.id,
+                  symbol: topSignal.symbol,
+                  direction: topSignal.direction,
+                  tradeType: topSignal.tradeType,
+                  orderSizeUsd: orderSize,
+                  entryPrice: topSignal.entryPrice,
+                  profitTarget,
+                  leverage: topSignal.tradeType === 'futures' ? 10 : 1,
+                  isPaperTrade: settings.is_paper_trading,
+                  aiScore: topSignal.score,
+                  aiReasoning: topSignal.reasoning,
+                },
+              })
+            );
+
+            setEngineMetrics(prev => ({
+              ...prev,
+              tradesPerHour: prev.tradesPerHour + 1,
+            }));
+          } catch (err) {
+            console.error('Trade execution failed:', err);
+          }
+        }
+      }
+
+      setEngineStatus('monitoring');
+    } catch (error) {
+      console.error('Trading loop error:', error);
+      setEngineStatus('error');
+    }
+  }, [settings, positions, signals, exchanges]);
 
   // Start bot
   const startBot = useCallback(async () => {
@@ -434,12 +653,17 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         .eq('id', settings.id);
       
       setIsEngineRunning(true);
+      isRunningRef.current = true;
       setSettings(prev => prev ? { ...prev, is_bot_running: true } : null);
       setEngineStatus('monitoring');
+      
+      // Start trading loop
+      runTradingLoop();
+      tradingLoopRef.current = setInterval(runTradingLoop, 30000);
     } catch (error) {
       console.error('Error starting bot:', error);
     }
-  }, [settings]);
+  }, [settings, runTradingLoop]);
 
   // Stop bot
   const stopBot = useCallback(async () => {
@@ -452,8 +676,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         .eq('id', settings.id);
       
       setIsEngineRunning(false);
+      isRunningRef.current = false;
       setSettings(prev => prev ? { ...prev, is_bot_running: false } : null);
       setEngineStatus('idle');
+      
+      // Stop trading loop but keep background scanning
+      if (tradingLoopRef.current) {
+        clearInterval(tradingLoopRef.current);
+        tradingLoopRef.current = null;
+      }
     } catch (error) {
       console.error('Error stopping bot:', error);
     }
@@ -485,8 +716,9 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setEngineMetrics(prev => ({
         ...prev,
         analysisTime: Date.now() - startTime,
+        lastScanTime: new Date(),
       }));
-      setEngineStatus('monitoring');
+      setEngineStatus(isEngineRunning ? 'monitoring' : 'idle');
       
       return newSignals;
     } catch (error) {
@@ -494,7 +726,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setEngineStatus('error');
       return [];
     }
-  }, [settings, exchanges]);
+  }, [settings, exchanges, isEngineRunning]);
 
   // Close position
   const closePosition = useCallback(async (positionId: string) => {
@@ -541,6 +773,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           total: Number(b.total),
         })) as Balance[]);
       }
+      
+      // Refresh exchanges to get updated last_balance_sync
+      const { data: exchangesData } = await supabase.from('exchanges').select('*');
+      if (exchangesData) {
+        setExchanges(exchangesData as Exchange[]);
+      }
     } catch (error) {
       console.error('Error syncing balances:', error);
       throw error;
@@ -558,8 +796,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       initialConnectionMade.current = true;
       // Connect to Binance immediately for public price data
       connectToExchange('binance');
+      
+      // Also start REST fallback immediately as a backup
+      setTimeout(() => {
+        // If WebSocket hasn't connected in 5 seconds, REST fallback will already be running
+        if (!connectionStates['binance']?.connected) {
+          startRestFallback();
+        }
+      }, 5000);
     }
-  }, [loading, connectToExchange]);
+  }, [loading, connectToExchange, startRestFallback, connectionStates]);
 
   // Connect to additional exchanges when they're configured
   useEffect(() => {
@@ -579,6 +825,21 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [exchanges, connectToExchange, syncBalances]);
+
+  // Start background scanning
+  useEffect(() => {
+    // Start background scan immediately
+    runBackgroundScan();
+    
+    // Run every 30 seconds
+    backgroundScanRef.current = setInterval(runBackgroundScan, BACKGROUND_SCAN_INTERVAL);
+    
+    return () => {
+      if (backgroundScanRef.current) {
+        clearInterval(backgroundScanRef.current);
+      }
+    };
+  }, [runBackgroundScan]);
 
   // Set up real-time subscriptions
   useEffect(() => {
@@ -637,10 +898,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       Object.values(reconnectTimeouts.current).forEach(t => clearTimeout(t));
       if (healthCheckRef.current) clearInterval(healthCheckRef.current);
       if (tradingLoopRef.current) clearInterval(tradingLoopRef.current);
+      if (restFallbackRef.current) clearInterval(restFallbackRef.current);
+      if (backgroundScanRef.current) clearInterval(backgroundScanRef.current);
     };
   }, [runHealthCheck]);
 
-  // Update position prices from WebSocket data
+  // Update position prices from WebSocket/REST data
   useEffect(() => {
     positions.forEach(position => {
       const currentPrice = prices[position.symbol];
@@ -674,6 +937,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     engineStatus,
     engineMetrics,
     isEngineRunning,
+    isScanning,
     loading,
     startBot,
     stopBot,

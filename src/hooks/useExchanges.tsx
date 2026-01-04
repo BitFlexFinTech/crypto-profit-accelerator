@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Exchange, Balance, ExchangeName } from '@/types/trading';
 import { useToast } from '@/hooks/use-toast';
@@ -11,6 +11,7 @@ export function useExchanges() {
   const [balances, setBalances] = useState<Balance[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     fetchExchanges();
@@ -49,6 +50,50 @@ export function useExchanges() {
       console.error('Error fetching balances:', error);
     }
   };
+
+  // Test connection before saving API keys
+  const testConnection = useCallback(async (
+    exchangeName: ExchangeName,
+    apiKey: string,
+    apiSecret: string,
+    passphrase?: string
+  ): Promise<{ success: boolean; message: string; balance?: number }> => {
+    setTesting(true);
+    try {
+      // Call the test-connection edge function (we'll create this)
+      const { data, error } = await supabase.functions.invoke('test-connection', {
+        body: {
+          exchange: exchangeName,
+          apiKey,
+          apiSecret,
+          passphrase,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        return {
+          success: true,
+          message: `Connected! Balance: $${data.balance?.toFixed(2) || '0.00'} USDT`,
+          balance: data.balance,
+        };
+      } else {
+        return {
+          success: false,
+          message: data?.error || 'Connection test failed',
+        };
+      }
+    } catch (error) {
+      console.error('Error testing connection:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Connection test failed',
+      };
+    } finally {
+      setTesting(false);
+    }
+  }, []);
 
   const connectExchange = async (
     exchangeName: ExchangeName,
@@ -200,10 +245,12 @@ export function useExchanges() {
     balances,
     loading,
     syncing,
+    testing,
     connectExchange,
     disconnectExchange,
     toggleFutures,
     syncBalances,
+    testConnection,
     getExchangeBalance,
     getTotalBalance,
     getConnectedExchangeNames,
