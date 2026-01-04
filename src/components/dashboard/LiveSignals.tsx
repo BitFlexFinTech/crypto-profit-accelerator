@@ -88,8 +88,20 @@ export function LiveSignals() {
                 style={{ animationDelay: `${index * 100}ms` }}
               >
                 <div className="flex items-center gap-3">
+                  {/* Speed Rank Badge */}
                   <div className="flex flex-col items-center">
-                    <span className={`text-2xl font-bold ${getScoreColor(signal.score)}`}>
+                    <Badge 
+                      variant="outline" 
+                      className={`text-xs font-bold ${
+                        index === 0 ? 'border-yellow-500 text-yellow-500 bg-yellow-500/10' :
+                        index === 1 ? 'border-gray-400 text-gray-400 bg-gray-400/10' :
+                        index === 2 ? 'border-amber-600 text-amber-600 bg-amber-600/10' :
+                        'border-muted-foreground'
+                      }`}
+                    >
+                      #{index + 1}
+                    </Badge>
+                    <span className={`text-2xl font-bold mt-1 ${getScoreColor(signal.score)}`}>
                       {signal.score}
                     </span>
                     <span className="text-xs text-muted-foreground">score</span>
@@ -118,7 +130,7 @@ export function LiveSignals() {
                         {signal.volatility} vol
                       </Badge>
                       <span>•</span>
-                      <span className="flex items-center gap-1">
+                      <span className="flex items-center gap-1 text-primary font-medium">
                         <Clock className="h-3 w-3" />
                         {signal.estimatedTimeToProfit}
                       </span>
