@@ -207,6 +207,105 @@ export function useTrades() {
     });
   };
 
+  // Get monthly stats for the past N months
+  const getMonthlyStats = (months: number = 12): { month: string; trades: number; profit: number; winRate: number }[] => {
+    const result: { month: string; trades: number; profit: number; winRate: number }[] = [];
+    const now = new Date();
+    
+    for (let i = months - 1; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+      const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+      
+      const monthTrades = trades.filter(t => {
+        if (!t.closed_at || t.status !== 'closed') return false;
+        const closeDate = new Date(t.closed_at);
+        return closeDate >= monthStart && closeDate <= monthEnd;
+      });
+
+      const profit = monthTrades.reduce((sum, t) => sum + (t.net_profit || 0), 0);
+      const wins = monthTrades.filter(t => (t.net_profit || 0) > 0).length;
+      const winRate = monthTrades.length > 0 ? (wins / monthTrades.length) * 100 : 0;
+
+      result.push({
+        month: date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+        trades: monthTrades.length,
+        profit,
+        winRate,
+      });
+    }
+    
+    return result;
+  };
+
+  // Get quarterly stats
+  const getQuarterlyStats = (): { quarter: string; trades: number; profit: number }[] => {
+    const result: { quarter: string; trades: number; profit: number }[] = [];
+    const now = new Date();
+    
+    for (let i = 3; i >= 0; i--) {
+      const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3 - (i * 3), 1);
+      const quarterEnd = new Date(quarterStart.getFullYear(), quarterStart.getMonth() + 3, 0, 23, 59, 59, 999);
+      
+      const quarterTrades = trades.filter(t => {
+        if (!t.closed_at || t.status !== 'closed') return false;
+        const closeDate = new Date(t.closed_at);
+        return closeDate >= quarterStart && closeDate <= quarterEnd;
+      });
+
+      const profit = quarterTrades.reduce((sum, t) => sum + (t.net_profit || 0), 0);
+      const q = Math.floor(quarterStart.getMonth() / 3) + 1;
+
+      result.push({
+        quarter: `Q${q} ${quarterStart.getFullYear()}`,
+        trades: quarterTrades.length,
+        profit,
+      });
+    }
+    
+    return result;
+  };
+
+  // Get period comparison
+  const getPeriodComparison = (period: 'week' | 'month' | 'quarter'): { current: number; previous: number; change: number } => {
+    const now = new Date();
+    let currentStart: Date, currentEnd: Date, previousStart: Date, previousEnd: Date;
+
+    switch (period) {
+      case 'week':
+        currentEnd = now;
+        currentStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        previousEnd = currentStart;
+        previousStart = new Date(previousEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case 'month':
+        currentStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        currentEnd = now;
+        previousStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        previousEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+        break;
+      case 'quarter':
+        const currentQ = Math.floor(now.getMonth() / 3);
+        currentStart = new Date(now.getFullYear(), currentQ * 3, 1);
+        currentEnd = now;
+        previousStart = new Date(now.getFullYear(), (currentQ - 1) * 3, 1);
+        previousEnd = new Date(now.getFullYear(), currentQ * 3, 0, 23, 59, 59, 999);
+        break;
+    }
+
+    const currentProfit = trades
+      .filter(t => t.status === 'closed' && t.closed_at && new Date(t.closed_at) >= currentStart && new Date(t.closed_at) <= currentEnd)
+      .reduce((sum, t) => sum + (t.net_profit || 0), 0);
+
+    const previousProfit = trades
+      .filter(t => t.status === 'closed' && t.closed_at && new Date(t.closed_at) >= previousStart && new Date(t.closed_at) <= previousEnd)
+      .reduce((sum, t) => sum + (t.net_profit || 0), 0);
+
+    const change = previousProfit !== 0 ? ((currentProfit - previousProfit) / Math.abs(previousProfit)) * 100 : 0;
+
+    return { current: currentProfit, previous: previousProfit, change };
+  };
+
   return {
     trades,
     dailyStats,
@@ -223,6 +322,9 @@ export function useTrades() {
     getClosedTradesCount,
     getTotalFees,
     getCumulativePnLData,
+    getMonthlyStats,
+    getQuarterlyStats,
+    getPeriodComparison,
     refetch: fetchTrades,
   };
 }

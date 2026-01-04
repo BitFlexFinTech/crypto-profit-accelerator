@@ -258,7 +258,9 @@ export type Database = {
           quantity: number
           status: Database["public"]["Enums"]["position_status"] | null
           symbol: string
+          take_profit_filled_at: string | null
           take_profit_order_id: string | null
+          take_profit_placed_at: string | null
           take_profit_price: number | null
           take_profit_status: string | null
           trade_id: string | null
@@ -281,7 +283,9 @@ export type Database = {
           quantity: number
           status?: Database["public"]["Enums"]["position_status"] | null
           symbol: string
+          take_profit_filled_at?: string | null
           take_profit_order_id?: string | null
+          take_profit_placed_at?: string | null
           take_profit_price?: number | null
           take_profit_status?: string | null
           trade_id?: string | null
@@ -304,7 +308,9 @@ export type Database = {
           quantity?: number
           status?: Database["public"]["Enums"]["position_status"] | null
           symbol?: string
+          take_profit_filled_at?: string | null
           take_profit_order_id?: string | null
+          take_profit_placed_at?: string | null
           take_profit_price?: number | null
           take_profit_status?: string | null
           trade_id?: string | null
@@ -383,6 +389,9 @@ export type Database = {
           quantity: number
           status: Database["public"]["Enums"]["position_status"] | null
           symbol: string
+          tp_filled_at: string | null
+          tp_placed_at: string | null
+          tp_price: number | null
           trade_type: Database["public"]["Enums"]["trade_type"]
           user_id: string | null
         }
@@ -408,6 +417,9 @@ export type Database = {
           quantity: number
           status?: Database["public"]["Enums"]["position_status"] | null
           symbol: string
+          tp_filled_at?: string | null
+          tp_placed_at?: string | null
+          tp_price?: number | null
           trade_type: Database["public"]["Enums"]["trade_type"]
           user_id?: string | null
         }
@@ -433,6 +445,9 @@ export type Database = {
           quantity?: number
           status?: Database["public"]["Enums"]["position_status"] | null
           symbol?: string
+          tp_filled_at?: string | null
+          tp_placed_at?: string | null
+          tp_price?: number | null
           trade_type?: Database["public"]["Enums"]["trade_type"]
           user_id?: string | null
         }
