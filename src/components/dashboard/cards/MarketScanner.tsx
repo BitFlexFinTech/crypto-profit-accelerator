@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { useTrading } from '@/contexts/TradingContext';
 import { cn } from '@/lib/utils';
@@ -11,36 +10,51 @@ interface MarketItem {
   change: number;
   volume: number;
   volatility: 'low' | 'medium' | 'high';
+  priceDirection: 'up' | 'down' | 'neutral';
 }
 
 export function MarketScanner() {
-  const { prices, signals, connectionStates } = useTrading();
+  const { prices, marketData, connectionStates } = useTrading();
   const [markets, setMarkets] = useState<MarketItem[]>([]);
-  const [prevPrices, setPrevPrices] = useState<Record<string, number>>({});
+  const prevPricesRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
-    // Generate market data from prices and signals
     const newMarkets: MarketItem[] = Object.entries(prices).map(([symbol, price]) => {
-      const signal = signals.find(s => s.symbol === symbol);
-      const prevPrice = prevPrices[symbol] || price;
-      const change = ((price - prevPrice) / prevPrice) * 100;
+      const data = marketData[symbol];
+      const prevPrice = prevPricesRef.current[symbol] || price;
+      const priceDirection: 'up' | 'down' | 'neutral' = price > prevPrice ? 'up' : price < prevPrice ? 'down' : 'neutral';
+      
+      // Use real data from WebSocket
+      const change24h = data?.change24h || 0;
+      const volume24h = data?.volume24h || 0;
+      const volatility = data?.volatility || 0;
       
       return {
         symbol,
         price,
-        change: isNaN(change) ? 0 : change,
-        volume: Math.random() * 1000000,
-        volatility: signal?.volatility || (Math.abs(change) > 0.5 ? 'high' : Math.abs(change) > 0.2 ? 'medium' : 'low'),
+        change: change24h,
+        volume: volume24h,
+        volatility: volatility > 5 ? 'high' : volatility > 2 ? 'medium' : 'low',
+        priceDirection,
       };
     });
     
-    // Sort by volatility/change
+    // Sort by volatility/change (most volatile first)
     newMarkets.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
     setMarkets(newMarkets.slice(0, 8));
-    setPrevPrices(prices);
-  }, [prices, signals]);
+    
+    // Store current prices for next comparison
+    prevPricesRef.current = { ...prices };
+  }, [prices, marketData]);
 
   const isConnected = Object.values(connectionStates).some(s => s.connected);
+
+  const formatVolume = (vol: number): string => {
+    if (vol >= 1000000000) return `${(vol / 1000000000).toFixed(1)}B`;
+    if (vol >= 1000000) return `${(vol / 1000000).toFixed(1)}M`;
+    if (vol >= 1000) return `${(vol / 1000).toFixed(1)}K`;
+    return vol.toFixed(0);
+  };
 
   return (
     <Card className="bg-card border-border overflow-hidden">
@@ -52,8 +66,8 @@ export function MarketScanner() {
           </CardTitle>
           <div className="flex items-center gap-2">
             <span className={cn(
-              "h-2 w-2 rounded-full animate-pulse",
-              isConnected ? "bg-primary" : "bg-destructive"
+              "h-2 w-2 rounded-full",
+              isConnected ? "bg-primary animate-pulse" : "bg-destructive"
             )} />
             <span className="text-xs text-muted-foreground">
               {isConnected ? 'Live' : 'Disconnected'}
@@ -65,7 +79,7 @@ export function MarketScanner() {
         <div className="divide-y divide-border max-h-[300px] overflow-y-auto scrollbar-thin">
           {markets.length === 0 ? (
             <div className="p-4 text-center text-muted-foreground text-sm">
-              Connect exchanges to see market data
+              {isConnected ? 'Loading market data...' : 'Connect exchanges to see market data'}
             </div>
           ) : (
             markets.map((market, i) => (
@@ -74,13 +88,14 @@ export function MarketScanner() {
                 className={cn(
                   "flex items-center justify-between p-3 transition-all duration-300",
                   "hover:bg-secondary/50",
-                  market.change > 0 ? "animate-fade-in" : ""
+                  market.priceDirection === 'up' && "bg-primary/5",
+                  market.priceDirection === 'down' && "bg-destructive/5"
                 )}
                 style={{ animationDelay: `${i * 50}ms` }}
               >
                 <div className="flex items-center gap-3">
                   <div className={cn(
-                    "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold",
+                    "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors duration-300",
                     market.volatility === 'high' ? 'bg-destructive/20 text-destructive' :
                     market.volatility === 'medium' ? 'bg-warning/20 text-warning' :
                     'bg-primary/20 text-primary'
@@ -90,16 +105,21 @@ export function MarketScanner() {
                   <div>
                     <p className="font-medium text-sm">{market.symbol}</p>
                     <p className="text-xs text-muted-foreground">
-                      Vol: {(market.volume / 1000).toFixed(0)}K
+                      Vol: {formatVolume(market.volume)}
                     </p>
                   </div>
                 </div>
                 <div className="text-right">
                   <p className={cn(
                     "font-mono text-sm font-medium transition-colors duration-300",
-                    market.change > 0 ? "text-primary" : market.change < 0 ? "text-destructive" : "text-foreground"
+                    market.priceDirection === 'up' ? "text-primary" : 
+                    market.priceDirection === 'down' ? "text-destructive" : 
+                    "text-foreground"
                   )}>
-                    ${market.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${market.price.toLocaleString(undefined, { 
+                      minimumFractionDigits: 2, 
+                      maximumFractionDigits: market.price < 1 ? 6 : 2 
+                    })}
                   </p>
                   <div className="flex items-center justify-end gap-1">
                     {market.change >= 0 ? (

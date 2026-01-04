@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { TradingProvider } from "@/contexts/TradingContext";
 import DashboardPage from "@/pages/Dashboard";
+import PortfolioPage from "@/pages/Portfolio";
 import AnalyticsPage from "@/pages/Analytics";
 import ChartsPage from "@/pages/Charts";
 import PositionsPage from "@/pages/Positions";
@@ -35,6 +36,7 @@ const App = () => (
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<MainLayout><DashboardPage /></MainLayout>} />
+              <Route path="/portfolio" element={<MainLayout><PortfolioPage /></MainLayout>} />
               <Route path="/analytics" element={<MainLayout><AnalyticsPage /></MainLayout>} />
               <Route path="/charts" element={<MainLayout><ChartsPage /></MainLayout>} />
               <Route path="/positions" element={<MainLayout><PositionsPage /></MainLayout>} />
