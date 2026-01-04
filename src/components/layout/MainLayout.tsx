@@ -8,6 +8,7 @@ import {
   Zap, 
   BarChart3,
   PieChart,
+  Wallet,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -16,6 +17,7 @@ import { cn } from '@/lib/utils';
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/portfolio', label: 'Portfolio', icon: Wallet },
   { path: '/analytics', label: 'Analytics', icon: PieChart },
   { path: '/charts', label: 'Charts', icon: BarChart3 },
   { path: '/positions', label: 'Positions', icon: TrendingUp },

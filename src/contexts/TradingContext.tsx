@@ -26,6 +26,7 @@ interface ConnectionState {
   lastPing: Date | null;
   latency: number;
   status: 'connected' | 'connecting' | 'disconnected' | 'error';
+  reconnectAttempts: number;
 }
 
 interface EngineMetrics {
@@ -41,6 +42,8 @@ interface MarketData {
   price: number;
   change24h: number;
   volume24h: number;
+  high24h: number;
+  low24h: number;
   volatility: number;
   lastUpdate: Date;
 }
@@ -54,7 +57,7 @@ interface TradingContextType {
   settings: BotSettings | null;
   signals: TradingSignal[];
   trades: Trade[];
-  marketData: MarketData[];
+  marketData: Record<string, MarketData>;
   
   // Connection states
   connectionStates: Record<string, ConnectionState>;
@@ -79,13 +82,18 @@ interface TradingContextType {
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
 
+// WebSocket endpoints for all supported exchanges
 const WS_ENDPOINTS: Record<string, string> = {
   binance: 'wss://stream.binance.com:9443/ws',
   okx: 'wss://ws.okx.com:8443/ws/v5/public',
   bybit: 'wss://stream.bybit.com/v5/public/spot',
+  kucoin: 'wss://ws-api-spot.kucoin.com',
 };
 
+const DEFAULT_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'BNB/USDT', 'ADA/USDT', 'AVAX/USDT'];
 const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY = 1000;
 
 export function TradingProvider({ children }: { children: ReactNode }) {
   // Core state
@@ -96,7 +104,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<BotSettings | null>(null);
   const [signals, setSignals] = useState<TradingSignal[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
-  const [marketData, setMarketData] = useState<MarketData[]>([]);
+  const [marketData, setMarketData] = useState<Record<string, MarketData>>({});
   
   // Connection states
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionState>>({});
@@ -118,6 +126,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const reconnectTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const tradingLoopRef = useRef<NodeJS.Timeout | null>(null);
   const healthCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const initialConnectionMade = useRef(false);
 
   // Fetch all data
   const fetchAllData = useCallback(async () => {
@@ -187,34 +196,66 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // WebSocket connection for price updates
-  const connectToExchange = useCallback((exchange: ExchangeName, symbols: string[]) => {
-    if (symbols.length === 0 || !WS_ENDPOINTS[exchange]) return;
+  // WebSocket connection with reconnection logic
+  const connectToExchange = useCallback((exchangeName: ExchangeName) => {
+    if (!WS_ENDPOINTS[exchangeName]) {
+      console.log(`No WebSocket endpoint for ${exchangeName}`);
+      return;
+    }
+
+    // Close existing connection if any
+    if (wsRefs.current[exchangeName]) {
+      wsRefs.current[exchangeName].close();
+    }
+
+    // Set connecting status
+    setConnectionStates(prev => ({
+      ...prev,
+      [exchangeName]: { 
+        connected: false, 
+        lastPing: null, 
+        latency: 0, 
+        status: 'connecting',
+        reconnectAttempts: prev[exchangeName]?.reconnectAttempts || 0,
+      },
+    }));
 
     const connectWs = () => {
       let ws: WebSocket;
+      const symbols = DEFAULT_SYMBOLS;
       
-      if (exchange === 'binance') {
-        const streams = symbols.map(s => s.replace('/', '').toLowerCase() + '@ticker').join('/');
-        ws = new WebSocket(`${WS_ENDPOINTS.binance}/${streams}`);
-      } else {
-        ws = new WebSocket(WS_ENDPOINTS[exchange]);
+      try {
+        if (exchangeName === 'binance') {
+          const streams = symbols.map(s => s.replace('/', '').toLowerCase() + '@ticker').join('/');
+          ws = new WebSocket(`${WS_ENDPOINTS.binance}/${streams}`);
+        } else {
+          ws = new WebSocket(WS_ENDPOINTS[exchangeName]);
+        }
+      } catch (error) {
+        console.error(`Failed to create WebSocket for ${exchangeName}:`, error);
+        return;
       }
 
       ws.onopen = () => {
-        console.log(`${exchange} WebSocket connected`);
+        console.log(`${exchangeName} WebSocket connected`);
         setConnectionStates(prev => ({
           ...prev,
-          [exchange]: { connected: true, lastPing: new Date(), latency: 0, status: 'connected' },
+          [exchangeName]: { 
+            connected: true, 
+            lastPing: new Date(), 
+            latency: 0, 
+            status: 'connected',
+            reconnectAttempts: 0,
+          },
         }));
 
         // Subscribe for OKX/Bybit
-        if (exchange === 'okx') {
+        if (exchangeName === 'okx') {
           ws.send(JSON.stringify({
             op: 'subscribe',
             args: symbols.map(s => ({ channel: 'tickers', instId: s.replace('/', '-') })),
           }));
-        } else if (exchange === 'bybit') {
+        } else if (exchangeName === 'bybit') {
           ws.send(JSON.stringify({
             op: 'subscribe',
             args: symbols.map(s => `tickers.${s.replace('/', '')}`),
@@ -227,59 +268,130 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           const data = JSON.parse(event.data);
           let symbol: string | null = null;
           let price: number | null = null;
+          let volume24h: number | null = null;
+          let high24h: number | null = null;
+          let low24h: number | null = null;
+          let change24h: number | null = null;
 
-          if (exchange === 'binance' && data.s && data.c) {
+          if (exchangeName === 'binance' && data.s && data.c) {
             symbol = data.s.replace('USDT', '/USDT');
             price = parseFloat(data.c);
-          } else if (exchange === 'okx' && data.data?.[0]) {
+            volume24h = parseFloat(data.v) || 0;
+            high24h = parseFloat(data.h) || 0;
+            low24h = parseFloat(data.l) || 0;
+            change24h = parseFloat(data.P) || 0;
+          } else if (exchangeName === 'okx' && data.data?.[0]) {
             symbol = data.data[0].instId.replace('-', '/');
             price = parseFloat(data.data[0].last);
-          } else if (exchange === 'bybit' && data.data && data.topic?.startsWith('tickers.')) {
+            volume24h = parseFloat(data.data[0].vol24h) || 0;
+            high24h = parseFloat(data.data[0].high24h) || 0;
+            low24h = parseFloat(data.data[0].low24h) || 0;
+            change24h = ((price - parseFloat(data.data[0].open24h)) / parseFloat(data.data[0].open24h)) * 100;
+          } else if (exchangeName === 'bybit' && data.data && data.topic?.startsWith('tickers.')) {
             symbol = data.topic.replace('tickers.', '').replace('USDT', '/USDT');
             price = parseFloat(data.data.lastPrice);
+            volume24h = parseFloat(data.data.volume24h) || 0;
+            high24h = parseFloat(data.data.highPrice24h) || 0;
+            low24h = parseFloat(data.data.lowPrice24h) || 0;
+            change24h = parseFloat(data.data.price24hPcnt) * 100 || 0;
           }
 
           if (symbol && price) {
             setPrices(prev => ({ ...prev, [symbol!]: price! }));
+            
+            // Update market data with real values
+            if (volume24h !== null) {
+              setMarketData(prev => ({
+                ...prev,
+                [symbol!]: {
+                  symbol: symbol!,
+                  price: price!,
+                  volume24h: volume24h!,
+                  high24h: high24h || price!,
+                  low24h: low24h || price!,
+                  change24h: change24h || 0,
+                  volatility: high24h && low24h ? ((high24h - low24h) / low24h) * 100 : 0,
+                  lastUpdate: new Date(),
+                },
+              }));
+            }
+            
             setConnectionStates(prev => ({
               ...prev,
-              [exchange]: { ...prev[exchange], lastPing: new Date() },
+              [exchangeName]: { ...prev[exchangeName], lastPing: new Date() },
             }));
           }
         } catch (e) {
-          console.error(`Error parsing ${exchange} message:`, e);
+          // Ignore parse errors for ping/pong messages
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (error) => {
+        console.error(`${exchangeName} WebSocket error:`, error);
         setConnectionStates(prev => ({
           ...prev,
-          [exchange]: { ...prev[exchange], connected: false, status: 'error' },
+          [exchangeName]: { ...prev[exchangeName], connected: false, status: 'error' },
         }));
       };
 
       ws.onclose = () => {
-        setConnectionStates(prev => ({
-          ...prev,
-          [exchange]: { ...prev[exchange], connected: false, status: 'disconnected' },
-        }));
+        console.log(`${exchangeName} WebSocket closed`);
+        setConnectionStates(prev => {
+          const currentState = prev[exchangeName];
+          const attempts = (currentState?.reconnectAttempts || 0) + 1;
+          
+          return {
+            ...prev,
+            [exchangeName]: { 
+              ...currentState, 
+              connected: false, 
+              status: 'disconnected',
+              reconnectAttempts: attempts,
+            },
+          };
+        });
         
         // Reconnect with exponential backoff
-        reconnectTimeouts.current[exchange] = setTimeout(() => connectWs(), 5000);
+        const currentState = connectionStates[exchangeName];
+        const attempts = (currentState?.reconnectAttempts || 0) + 1;
+        
+        if (attempts <= MAX_RECONNECT_ATTEMPTS) {
+          const delay = RECONNECT_BASE_DELAY * Math.pow(2, attempts - 1);
+          console.log(`Reconnecting to ${exchangeName} in ${delay}ms (attempt ${attempts})`);
+          reconnectTimeouts.current[exchangeName] = setTimeout(() => connectWs(), delay);
+        } else {
+          console.error(`Max reconnection attempts reached for ${exchangeName}`);
+        }
       };
 
-      wsRefs.current[exchange] = ws;
+      wsRefs.current[exchangeName] = ws;
     };
 
     connectWs();
-  }, []);
+  }, [connectionStates]);
+
+  // Connect to all available exchanges on startup
+  const connectAllExchanges = useCallback(() => {
+    // Always connect to Binance for public price data (no API key required)
+    if (!wsRefs.current['binance']) {
+      connectToExchange('binance');
+    }
+    
+    // Connect to other exchanges that have API keys configured
+    exchanges.filter(e => e.is_connected && e.api_key_encrypted).forEach(exchange => {
+      const exchangeName = exchange.exchange as ExchangeName;
+      if (!wsRefs.current[exchangeName] && WS_ENDPOINTS[exchangeName]) {
+        connectToExchange(exchangeName);
+      }
+    });
+  }, [exchanges, connectToExchange]);
 
   // Health check for connections
   const runHealthCheck = useCallback(() => {
     const now = Date.now();
     Object.entries(connectionStates).forEach(([exchange, state]) => {
-      if (state.lastPing && now - state.lastPing.getTime() > 30000) {
-        // No ping in 30 seconds, reconnect
+      if (state.lastPing && now - state.lastPing.getTime() > 30000 && state.status === 'connected') {
+        console.log(`No ping from ${exchange} in 30 seconds, reconnecting...`);
         const ws = wsRefs.current[exchange];
         if (ws) {
           ws.close();
@@ -412,11 +524,34 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Initialize
+  // Initialize - fetch data first
   useEffect(() => {
     fetchAllData();
-    
-    // Set up real-time subscriptions
+  }, [fetchAllData]);
+
+  // Connect WebSockets after exchanges are loaded
+  useEffect(() => {
+    if (!loading && !initialConnectionMade.current) {
+      initialConnectionMade.current = true;
+      // Connect to Binance immediately for public price data
+      connectToExchange('binance');
+    }
+  }, [loading, connectToExchange]);
+
+  // Connect to additional exchanges when they're configured
+  useEffect(() => {
+    if (exchanges.length > 0) {
+      exchanges.filter(e => e.is_connected).forEach(exchange => {
+        const exchangeName = exchange.exchange as ExchangeName;
+        if (!wsRefs.current[exchangeName] && WS_ENDPOINTS[exchangeName]) {
+          connectToExchange(exchangeName);
+        }
+      });
+    }
+  }, [exchanges, connectToExchange]);
+
+  // Set up real-time subscriptions
+  useEffect(() => {
     const positionsChannel = supabase
       .channel('positions-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'positions' }, () => {
@@ -445,32 +580,37 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       })
       .subscribe();
 
+    const balancesChannel = supabase
+      .channel('balances-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'balances' }, () => {
+        supabase.from('balances').select('*').then(({ data }) => {
+          if (data) {
+            setBalances(data.map(b => ({
+              ...b,
+              available: Number(b.available),
+              locked: Number(b.locked),
+              total: Number(b.total),
+            })) as Balance[]);
+          }
+        });
+      })
+      .subscribe();
+
     // Health check interval
     healthCheckRef.current = setInterval(runHealthCheck, 10000);
 
     return () => {
       supabase.removeChannel(positionsChannel);
       supabase.removeChannel(tradesChannel);
+      supabase.removeChannel(balancesChannel);
       Object.values(wsRefs.current).forEach(ws => ws.close());
       Object.values(reconnectTimeouts.current).forEach(t => clearTimeout(t));
       if (healthCheckRef.current) clearInterval(healthCheckRef.current);
       if (tradingLoopRef.current) clearInterval(tradingLoopRef.current);
     };
-  }, [fetchAllData, runHealthCheck]);
+  }, [runHealthCheck]);
 
-  // Connect WebSockets when exchanges change
-  useEffect(() => {
-    const connectedExchanges = exchanges.filter(e => e.is_connected);
-    const defaultSymbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT'];
-    
-    connectedExchanges.forEach(exchange => {
-      if (!wsRefs.current[exchange.exchange]) {
-        connectToExchange(exchange.exchange as ExchangeName, defaultSymbols);
-      }
-    });
-  }, [exchanges, connectToExchange]);
-
-  // Update position prices
+  // Update position prices from WebSocket data
   useEffect(() => {
     positions.forEach(position => {
       const currentPrice = prices[position.symbol];
