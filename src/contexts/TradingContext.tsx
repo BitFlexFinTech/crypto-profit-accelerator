@@ -876,12 +876,27 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [exchanges, connectToExchange, syncBalances]);
 
+  // Auto-resume trading loop if bot was already running (e.g., after page refresh)
+  useEffect(() => {
+    if (!loading && settings?.is_bot_running && !tradingLoopRef.current) {
+      console.log('🔄 Auto-resuming trading loop (bot was already running)');
+      setIsEngineRunning(true);
+      isRunningRef.current = true;
+      setEngineStatus('monitoring');
+      
+      // Start the trading loop
+      runTradingLoop();
+      tradingLoopRef.current = setInterval(runTradingLoop, TRADING_LOOP_INTERVAL);
+      profitCheckRef.current = setInterval(checkProfitTargets, PROFIT_CHECK_INTERVAL);
+    }
+  }, [loading, settings?.is_bot_running, runTradingLoop, checkProfitTargets]);
+
   // Start background scanning
   useEffect(() => {
     // Start background scan immediately
     runBackgroundScan();
     
-    // Run every 30 seconds
+    // Run every 5 seconds for fast AI analysis
     backgroundScanRef.current = setInterval(runBackgroundScan, BACKGROUND_SCAN_INTERVAL);
     
     return () => {
