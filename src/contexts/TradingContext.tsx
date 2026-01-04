@@ -84,6 +84,9 @@ interface TradingContextType {
   // Loading states
   loading: boolean;
   
+  // Realtime sync tracking
+  lastRealtimeUpdate: number;
+  
   // Actions
   startBot: () => Promise<void>;
   stopBot: () => Promise<void>;
@@ -162,6 +165,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [isEngineRunning, setIsEngineRunning] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Track last realtime update for sync status display
+  const [lastRealtimeUpdate, setLastRealtimeUpdate] = useState<number>(Date.now());
   
   // Refs for stability (prevent closure issues)
   const wsRefs = useRef<Record<string, WebSocket>>({});
@@ -1361,50 +1366,114 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     };
   }, [runWatchdog]);
 
-  // Set up real-time subscriptions (stable - no runHealthCheck in deps)
+  // Set up real-time subscriptions with EFFICIENT incremental updates
   useEffect(() => {
+    // Helper to normalize position data
+    const normalizePosition = (p: any): Position => ({
+      ...p,
+      entry_price: Number(p.entry_price),
+      current_price: p.current_price ? Number(p.current_price) : undefined,
+      quantity: Number(p.quantity),
+      order_size_usd: Number(p.order_size_usd),
+      unrealized_pnl: Number(p.unrealized_pnl),
+      profit_target: Number(p.profit_target),
+      take_profit_price: p.take_profit_price ? Number(p.take_profit_price) : undefined,
+    });
+
+    // Helper to normalize balance data
+    const normalizeBalance = (b: any): Balance => ({
+      ...b,
+      available: Number(b.available),
+      locked: Number(b.locked),
+      total: Number(b.total),
+    });
+
+    // OPTIMIZED: Incremental updates for positions
     const positionsChannel = supabase
       .channel('positions-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'positions' }, () => {
-        supabase.from('positions').select('*').eq('status', 'open').then(({ data }) => {
-          if (data) {
-            setPositions(data.map(p => ({
-              ...p,
-              entry_price: Number(p.entry_price),
-              current_price: p.current_price ? Number(p.current_price) : undefined,
-              quantity: Number(p.quantity),
-              order_size_usd: Number(p.order_size_usd),
-              unrealized_pnl: Number(p.unrealized_pnl),
-              profit_target: Number(p.profit_target),
-            })) as Position[]);
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'positions' }, 
+        (payload) => {
+          const newPosition = normalizePosition(payload.new);
+          if (newPosition.status === 'open') {
+            setPositions(prev => [...prev, newPosition]);
           }
-        });
-      })
+          setLastRealtimeUpdate(Date.now());
+          console.log('📥 Realtime: Position inserted', newPosition.symbol);
+        })
+      .on('postgres_changes', 
+        { event: 'UPDATE', schema: 'public', table: 'positions' }, 
+        (payload) => {
+          const updatedPosition = normalizePosition(payload.new);
+          if (updatedPosition.status === 'closed') {
+            // Remove closed positions from list
+            setPositions(prev => prev.filter(p => p.id !== updatedPosition.id));
+          } else {
+            // Update existing position
+            setPositions(prev => prev.map(p => 
+              p.id === updatedPosition.id ? updatedPosition : p
+            ));
+          }
+          setLastRealtimeUpdate(Date.now());
+          console.log('📥 Realtime: Position updated', updatedPosition.symbol, updatedPosition.status);
+        })
+      .on('postgres_changes', 
+        { event: 'DELETE', schema: 'public', table: 'positions' }, 
+        (payload) => {
+          const deletedId = (payload.old as any).id;
+          setPositions(prev => prev.filter(p => p.id !== deletedId));
+          setLastRealtimeUpdate(Date.now());
+          console.log('📥 Realtime: Position deleted', deletedId);
+        })
       .subscribe();
 
+    // OPTIMIZED: Incremental updates for trades
     const tradesChannel = supabase
       .channel('trades-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'trades' }, () => {
-        supabase.from('trades').select('*').order('created_at', { ascending: false }).limit(100).then(({ data }) => {
-          if (data) setTrades(data as Trade[]);
-        });
-      })
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'trades' }, 
+        (payload) => {
+          const newTrade = payload.new as Trade;
+          setTrades(prev => [newTrade, ...prev.slice(0, 99)]); // Keep last 100
+          setLastRealtimeUpdate(Date.now());
+          console.log('📥 Realtime: Trade inserted', newTrade.symbol);
+        })
+      .on('postgres_changes', 
+        { event: 'UPDATE', schema: 'public', table: 'trades' }, 
+        (payload) => {
+          const updatedTrade = payload.new as Trade;
+          setTrades(prev => prev.map(t => 
+            t.id === updatedTrade.id ? updatedTrade : t
+          ));
+          setLastRealtimeUpdate(Date.now());
+          console.log('📥 Realtime: Trade updated', updatedTrade.symbol);
+        })
       .subscribe();
 
+    // OPTIMIZED: Incremental updates for balances
     const balancesChannel = supabase
       .channel('balances-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'balances' }, () => {
-        supabase.from('balances').select('*').then(({ data }) => {
-          if (data) {
-            setBalances(data.map(b => ({
-              ...b,
-              available: Number(b.available),
-              locked: Number(b.locked),
-              total: Number(b.total),
-            })) as Balance[]);
-          }
-        });
-      })
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'balances' }, 
+        (payload) => {
+          const balance = normalizeBalance(payload.new);
+          setBalances(prev => [...prev, balance]);
+          setLastRealtimeUpdate(Date.now());
+        })
+      .on('postgres_changes', 
+        { event: 'UPDATE', schema: 'public', table: 'balances' }, 
+        (payload) => {
+          const balance = normalizeBalance(payload.new);
+          setBalances(prev => prev.map(b => b.id === balance.id ? balance : b));
+          setLastRealtimeUpdate(Date.now());
+        })
+      .on('postgres_changes', 
+        { event: 'DELETE', schema: 'public', table: 'balances' }, 
+        (payload) => {
+          const deletedId = (payload.old as any).id;
+          setBalances(prev => prev.filter(b => b.id !== deletedId));
+          setLastRealtimeUpdate(Date.now());
+        })
       .subscribe();
 
     healthCheckRef.current = setInterval(runHealthCheck, 10000);
@@ -1501,6 +1570,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     isEngineRunning,
     isScanning,
     loading,
+    lastRealtimeUpdate,
     startBot,
     stopBot,
     forceAnalyze,

@@ -258,6 +258,9 @@ export type Database = {
           quantity: number
           status: Database["public"]["Enums"]["position_status"] | null
           symbol: string
+          take_profit_order_id: string | null
+          take_profit_price: number | null
+          take_profit_status: string | null
           trade_id: string | null
           trade_type: Database["public"]["Enums"]["trade_type"]
           unrealized_pnl: number | null
@@ -278,6 +281,9 @@ export type Database = {
           quantity: number
           status?: Database["public"]["Enums"]["position_status"] | null
           symbol: string
+          take_profit_order_id?: string | null
+          take_profit_price?: number | null
+          take_profit_status?: string | null
           trade_id?: string | null
           trade_type: Database["public"]["Enums"]["trade_type"]
           unrealized_pnl?: number | null
@@ -298,6 +304,9 @@ export type Database = {
           quantity?: number
           status?: Database["public"]["Enums"]["position_status"] | null
           symbol?: string
+          take_profit_order_id?: string | null
+          take_profit_price?: number | null
+          take_profit_status?: string | null
           trade_id?: string | null
           trade_type?: Database["public"]["Enums"]["trade_type"]
           unrealized_pnl?: number | null
