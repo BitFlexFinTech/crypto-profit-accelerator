@@ -1,12 +1,14 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useTrades } from '@/hooks/useTrades';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
+import { PriceChart } from '@/components/charts/PriceChart';
 
 export function PnLCharts() {
   const { trades, dailyStats } = useTrades();
+  const [activeTab, setActiveTab] = useState('price');
 
   const dailyData = useMemo(() => {
     return dailyStats
@@ -26,7 +28,6 @@ export function PnLCharts() {
   }, [dailyStats]);
 
   const weeklyData = useMemo(() => {
-    // Group trades by week
     const weeks: { [key: string]: number } = {};
     const now = new Date();
     
@@ -60,16 +61,21 @@ export function PnLCharts() {
 
   return (
     <Card className="bg-card border-border">
-      <CardHeader>
+      <CardHeader className="pb-2">
         <CardTitle className="text-foreground">Performance Charts</CardTitle>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="cumulative" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-4">
+            <TabsTrigger value="price">Price Chart</TabsTrigger>
             <TabsTrigger value="cumulative">Cumulative P&L</TabsTrigger>
             <TabsTrigger value="daily">Daily P&L</TabsTrigger>
             <TabsTrigger value="weekly">Weekly P&L</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="price" className="mt-0">
+            <PriceChart />
+          </TabsContent>
 
           <TabsContent value="cumulative">
             <div className="h-64">
