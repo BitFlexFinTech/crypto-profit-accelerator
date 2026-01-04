@@ -414,66 +414,93 @@ function calculateMomentum(change1h: number, change24h: number): "bearish" | "ne
   return "neutral";
 }
 
+// ⚡ SPEED-FIRST SCORING: Prioritize pairs that can close in under 3 minutes
 function calculateScore(
   data: MarketData, 
   aggressiveness: string, 
   historicalPerf?: HistoricalPerformance,
   technicals?: TechnicalIndicators
-): number {
-  const volatilityScore = calculateVolatility(data.high24h, data.low24h, data.price) === "high" ? 30 : 
-                          calculateVolatility(data.high24h, data.low24h, data.price) === "medium" ? 20 : 10;
+): { score: number; speedRating: string; rejected: boolean } {
   
-  const momentumScore = Math.abs(data.priceChange1h) * 5 + Math.abs(data.priceChange24h);
-  const volumeScore = Math.min(data.volume24h / 10000000, 30);
+  // 🚨 HARD SPEED FILTER: Reject pairs with slow historical performance
+  if (historicalPerf && historicalPerf.tradeCount >= 5 && historicalPerf.avgDurationSec > 180) {
+    console.log(`REJECTED ${data.symbol}: avg ${Math.round(historicalPerf.avgDurationSec)}s > 180s limit`);
+    return { score: 0, speedRating: "slow", rejected: true };
+  }
+  
+  // Reject low win rate pairs
+  if (historicalPerf && historicalPerf.tradeCount >= 5 && historicalPerf.winRate < 0.4) {
+    console.log(`REJECTED ${data.symbol}: win rate ${(historicalPerf.winRate * 100).toFixed(0)}% < 40%`);
+    return { score: 0, speedRating: "low-win", rejected: true };
+  }
+
+  // Base volatility score (higher volatility = faster profit)
+  const volatilityScore = calculateVolatility(data.high24h, data.low24h, data.price) === "high" ? 35 : 
+                          calculateVolatility(data.high24h, data.low24h, data.price) === "medium" ? 20 : 5;
+  
+  // Momentum score (stronger momentum = faster profit)
+  const momentumScore = Math.abs(data.priceChange1h) * 8 + Math.abs(data.priceChange24h) * 0.5;
+  
+  // Volume score (higher volume = faster fills)
+  const volumeScore = Math.min(data.volume24h / 10000000, 25);
   
   let baseScore = volatilityScore + momentumScore + volumeScore;
+  let speedRating = "medium";
   
-  // TECHNICAL INDICATOR BOOST
+  // TECHNICAL INDICATOR BOOST (Strong signals = higher probability)
   if (technicals) {
-    // RSI scoring
-    if (technicals.rsiSignal === "oversold") {
-      baseScore += 15; // Strong long signal
-    } else if (technicals.rsiSignal === "overbought") {
-      baseScore += 15; // Strong short signal
+    // RSI extremes = high probability reversal
+    if (technicals.rsiSignal === "oversold" && technicals.rsi < 25) {
+      baseScore += 20; // Very strong long signal
+    } else if (technicals.rsiSignal === "overbought" && technicals.rsi > 75) {
+      baseScore += 20; // Very strong short signal
+    } else if (technicals.rsiSignal === "oversold" || technicals.rsiSignal === "overbought") {
+      baseScore += 12;
     }
     
-    // MACD scoring
+    // MACD crossover = trend confirmation
     if (technicals.macdSignal === "bullish" || technicals.macdSignal === "bearish") {
-      baseScore += 10; // Clear trend
+      baseScore += 10;
     }
     
-    // Bollinger Bands scoring
-    if (technicals.bbSignal === "buy" || technicals.bbSignal === "sell") {
-      baseScore += 8; // Price at extremes
+    // Bollinger extremes = mean reversion opportunity
+    if (technicals.bbPosition < 0.1 || technicals.bbPosition > 0.9) {
+      baseScore += 15; // Very extreme = fast reversal
+    } else if (technicals.bbSignal === "buy" || technicals.bbSignal === "sell") {
+      baseScore += 8;
     }
   }
   
-  // HISTORICAL PERFORMANCE BOOST
+  // ⚡ SPEED BOOST: Proven fast pairs get major bonus
   if (historicalPerf && historicalPerf.tradeCount >= 3) {
-    if (historicalPerf.avgDurationSec < 300) {
-      baseScore += 20;
-    } else if (historicalPerf.avgDurationSec < 600) {
-      baseScore += 10;
-    } else if (historicalPerf.avgDurationSec > 1200) {
-      baseScore -= 15;
+    if (historicalPerf.avgDurationSec < 60) {
+      baseScore += 30; // Under 1 min = EXCELLENT
+      speedRating = "ultra-fast";
+    } else if (historicalPerf.avgDurationSec < 120) {
+      baseScore += 25; // Under 2 min = GREAT
+      speedRating = "fast";
+    } else if (historicalPerf.avgDurationSec < 180) {
+      baseScore += 15; // Under 3 min = GOOD
+      speedRating = "good";
     }
     
-    if (historicalPerf.winRate >= 0.7) {
-      baseScore += 15;
-    } else if (historicalPerf.winRate >= 0.5) {
+    // Win rate bonus
+    if (historicalPerf.winRate >= 0.85) {
+      baseScore += 20;
+    } else if (historicalPerf.winRate >= 0.7) {
+      baseScore += 12;
+    } else if (historicalPerf.winRate >= 0.6) {
       baseScore += 5;
-    } else if (historicalPerf.winRate < 0.3) {
-      baseScore -= 20;
     }
   }
   
   if (aggressiveness === "aggressive") {
-    baseScore *= 1.2;
+    baseScore *= 1.3;
   } else if (aggressiveness === "conservative") {
-    baseScore *= 0.8;
+    baseScore *= 0.7;
   }
   
-  return Math.min(Math.round(baseScore), 100);
+  return { score: Math.min(Math.round(baseScore), 100), speedRating, rejected: false };
 }
 
 // Determine direction based on technical indicators
@@ -588,16 +615,21 @@ serve(async (req) => {
     console.log("Calculated technical indicators for", technicalMap.size, "symbols");
 
     // Prepare data for AI analysis with technical indicators
+    // ⚡ SPEED FILTER: Only include pairs that pass speed requirements
     const marketSummary = allMarketData.flatMap(({ exchange, data }) =>
       data.map(d => {
         const perf = historicalPerf[d.symbol];
         const technicals = technicalMap.get(d.symbol);
+        const scoreResult = calculateScore(d, aggressiveness, perf, technicals);
+        
         return {
           exchange,
           ...d,
           volatility: calculateVolatility(d.high24h, d.low24h, d.price),
           momentum: calculateMomentum(d.priceChange1h, d.priceChange24h),
-          score: calculateScore(d, aggressiveness, perf, technicals),
+          score: scoreResult.score,
+          speedRating: scoreResult.speedRating,
+          rejected: scoreResult.rejected,
           // Technical indicators for AI context
           rsi: technicals?.rsi.toFixed(1),
           macdSignal: technicals?.macdSignal,
@@ -610,56 +642,60 @@ serve(async (req) => {
           historicalTradeCount: perf?.tradeCount,
         };
       })
-    );
+    ).filter(d => !d.rejected); // Remove rejected slow pairs
 
     marketSummary.sort((a, b) => b.score - a.score);
     const topCandidates = marketSummary.slice(0, 10);
+    
+    console.log(`Speed-filtered: ${topCandidates.length} candidates (removed slow pairs)`);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    const aiPrompt = `You are an expert HIGH-FREQUENCY crypto trading analyst using RSI, MACD, and Bollinger Bands.
+    const aiPrompt = `You are an ULTRA HIGH-FREQUENCY crypto trading analyst. Your ONLY goal is finding trades that close profitably in UNDER 3 MINUTES.
 
-CRITICAL REQUIREMENTS:
-- ONLY select from TOP 10 high-liquidity pairs
-- Use RSI, MACD, and Bollinger Bands to determine direction
-- Target: UNDER 5 MINUTES to hit profit target
+⚡ CRITICAL: 85%+ PROBABILITY, UNDER 3 MINUTE TRADES ONLY ⚡
 
-🚨 DIRECTION RULES - TECHNICAL ANALYSIS BASED:
-1. RSI < 30 (oversold) = STRONG LONG signal
-2. RSI > 70 (overbought) = STRONG SHORT signal
-3. MACD bullish crossover = LONG signal
-4. MACD bearish crossover = SHORT signal
-5. Price at lower Bollinger Band (bbPosition < 0.2) = LONG
-6. Price at upper Bollinger Band (bbPosition > 0.8) = SHORT
-7. You MUST return a MIX of LONG and SHORT based on indicators
+SPEED-FIRST REQUIREMENTS:
+- Target: UNDER 3 MINUTES to hit $1 profit (spot) or $3 profit (futures)
+- Only select pairs with HIGH volatility and STRONG momentum
+- Speed rating "ultra-fast" or "fast" pairs get priority
+- Reject anything that historically takes >3 minutes
 
-Market Data with Technical Indicators:
-${JSON.stringify(topCandidates, null, 2)}
+🎯 DIRECTION RULES (Technical Analysis):
+1. RSI < 25 = VERY STRONG LONG (fast bounce)
+2. RSI > 75 = VERY STRONG SHORT (fast reversal)
+3. RSI 25-30 = LONG, RSI 70-75 = SHORT
+4. MACD bullish + price near BB lower = STRONG LONG
+5. MACD bearish + price near BB upper = STRONG SHORT
+6. High volatility + momentum alignment = FASTEST TRADES
 
-Direction Analysis with Technicals:
+📊 Speed-Filtered Market Data:
+${JSON.stringify(topCandidates.slice(0, 8), null, 2)}
+
+🔍 Technical Analysis Summary:
 ${topCandidates.slice(0, 5).map(c => {
   const techDir = c.rsiSignal === 'oversold' ? 'LONG' : c.rsiSignal === 'overbought' ? 'SHORT' : 
                   c.macdSignal === 'bullish' ? 'LONG' : c.macdSignal === 'bearish' ? 'SHORT' : 
                   c.bbSignal === 'buy' ? 'LONG' : c.bbSignal === 'sell' ? 'SHORT' : 'NEUTRAL';
-  return `${c.symbol}: RSI=${c.rsi} (${c.rsiSignal}), MACD=${c.macdSignal}, BB=${c.bbPosition} (${c.bbSignal}) → ${techDir}`;
+  const avgTime = c.historicalAvgDuration ? `${Math.round(c.historicalAvgDuration)}s` : 'N/A';
+  const winRate = c.historicalWinRate ? `${(c.historicalWinRate * 100).toFixed(0)}%` : 'N/A';
+  return `${c.symbol}: RSI=${c.rsi}, MACD=${c.macdSignal}, BB=${c.bbPosition}, Speed=${c.speedRating}, AvgTime=${avgTime}, WinRate=${winRate} → ${techDir}`;
 }).join('\n')}
 
-Trading Parameters:
-- Mode: ${mode} (spot = $1 profit, futures = $3 profit)
-- Aggressiveness: ${aggressiveness}
+Trading Mode: ${mode} | Aggressiveness: ${aggressiveness}
 
-For top 5 opportunities, provide direction based on technical indicators.
+Select top 5 opportunities with 85%+ probability of closing in under 3 minutes.
 Respond ONLY with JSON array:
 [
   {
     "symbol": "BTC/USDT",
     "direction": "long",
-    "confidence": 0.85,
-    "timeToProfit": "2-3 min",
-    "reasoning": "RSI 28 oversold, MACD bullish, at lower BB - strong buy"
+    "confidence": 0.88,
+    "timeToProfit": "1-2 min",
+    "reasoning": "RSI 24 extreme oversold + MACD bullish + high volatility = fast bounce expected"
   }
 ]`;
 
@@ -680,23 +716,34 @@ Respond ONLY with JSON array:
 
     if (!aiResponse.ok) {
       console.error("AI API error:", await aiResponse.text());
-      // Fallback to algorithmic with technical indicators
+      // ⚡ SPEED-OPTIMIZED Fallback to algorithmic with technical indicators
       const signals: TradingSignal[] = topCandidates.slice(0, 5).map(candidate => {
         const technicals = technicalMap.get(candidate.symbol);
         const direction = determineDirectionFromTechnicals(candidate, technicals);
+        
+        // Calculate confidence based on technical alignment and speed rating
+        let confidence = Math.min(candidate.score / 100, 0.85);
+        if (candidate.speedRating === "ultra-fast") confidence = Math.min(confidence + 0.10, 0.95);
+        else if (candidate.speedRating === "fast") confidence = Math.min(confidence + 0.05, 0.92);
+        
+        // Estimate time based on volatility and speed rating
+        let estimatedTime = "2-4 min";
+        if (candidate.speedRating === "ultra-fast") estimatedTime = "30s-1 min";
+        else if (candidate.speedRating === "fast") estimatedTime = "1-2 min";
+        else if (candidate.volatility === "high") estimatedTime = "1-3 min";
         
         return {
           exchange: candidate.exchange,
           symbol: candidate.symbol,
           direction,
           score: candidate.score,
-          confidence: Math.min(candidate.score / 100, 0.9),
+          confidence,
           volatility: candidate.volatility,
           momentum: candidate.momentum,
-          estimatedTimeToProfit: candidate.volatility === "high" ? "1-3 min" : candidate.volatility === "medium" ? "3-8 min" : "8-15 min",
+          estimatedTimeToProfit: estimatedTime,
           entryPrice: candidate.price,
           targetPrice: candidate.price * (direction === "long" ? 1.001 : 0.999),
-          reasoning: `${direction.toUpperCase()} - RSI ${technicals?.rsi.toFixed(0) || 50} (${technicals?.rsiSignal || 'neutral'}), MACD ${technicals?.macdSignal || 'neutral'}, BB ${((technicals?.bbPosition || 0.5) * 100).toFixed(0)}%`,
+          reasoning: `${direction.toUpperCase()} [${candidate.speedRating}] - RSI ${technicals?.rsi.toFixed(0) || 50} (${technicals?.rsiSignal || 'neutral'}), MACD ${technicals?.macdSignal || 'neutral'}, BB ${((technicals?.bbPosition || 0.5) * 100).toFixed(0)}%`,
           tradeType: mode === "futures" ? "futures" : "spot" as "spot" | "futures",
         };
       });

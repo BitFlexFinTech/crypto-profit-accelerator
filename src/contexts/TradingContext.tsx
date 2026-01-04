@@ -4,6 +4,7 @@ import { Position, Exchange, Balance, BotSettings, Trade } from '@/types/trading
 import { rateLimiter } from '@/services/RateLimiter';
 import { invokeWithRetry } from '@/utils/retryWithBackoff';
 import { fetchAllPrices } from '@/services/PriceFetcher';
+import { wsManager, PriceUpdate } from '@/services/ExchangeWebSocketManager';
 
 type ExchangeName = 'binance' | 'okx' | 'nexo' | 'bybit' | 'kucoin' | 'hyperliquid';
 
@@ -105,18 +106,26 @@ const WS_ENDPOINTS: Record<string, string> = {
   kucoin: 'wss://ws-api-spot.kucoin.com',
 };
 
-const DEFAULT_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'BNB/USDT', 'ADA/USDT', 'AVAX/USDT', 'MATIC/USDT', 'LINK/USDT', 'DOT/USDT', 'ATOM/USDT'];
+// TOP 20 high-liquidity pairs for fast trading
+const DEFAULT_SYMBOLS = [
+  'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT',
+  'BNB/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 'DOT/USDT',
+  'MATIC/USDT', 'ATOM/USDT', 'UNI/USDT', 'LTC/USDT', 'FIL/USDT',
+  'APT/USDT', 'ARB/USDT', 'OP/USDT', 'NEAR/USDT', 'INJ/USDT',
+];
 const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
-const MAX_RECONNECT_ATTEMPTS = 5;
+const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_BASE_DELAY = 1000;
-const REST_FALLBACK_INTERVAL = 2000;
-const BACKGROUND_SCAN_INTERVAL = 5000;
-const TRADING_LOOP_INTERVAL = 3000;
-const PROFIT_CHECK_INTERVAL = 1000;
-const WATCHDOG_INTERVAL = 5000;
+const REST_FALLBACK_INTERVAL = 1500; // Faster fallback polling
+
+// ⚡ SPEED OPTIMIZED INTERVALS - Target: <3 min trades
+const BACKGROUND_SCAN_INTERVAL = 2000; // 2s - More frequent AI scans
+const TRADING_LOOP_INTERVAL = 1000; // 1s - Faster trade execution
+const PROFIT_CHECK_INTERVAL = 500; // 500ms - Instant profit capture
+const WATCHDOG_INTERVAL = 3000; // 3s - Faster watchdog
 const MAX_EXECUTION_LOGS = 200;
-const MAX_NEW_TRADES_PER_CYCLE = 3; // Execute up to 3 distinct signals per loop cycle for diversification
-const BALANCE_SYNC_INTERVAL = 10000; // Auto-sync balances every 10 seconds for real-time updates
+const MAX_NEW_TRADES_PER_CYCLE = 5; // More parallel trades for velocity
+const BALANCE_SYNC_INTERVAL = 5000; // 5s - Faster balance updates
 
 // LOWERED THRESHOLDS for more trading
 const THRESHOLDS = {
@@ -897,15 +906,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             continue;
           }
 
-          // Check per-signal cooldown (FASTER for high-confidence signals)
+          // ⚡ SPEED OPTIMIZED: Much faster cooldowns for high-velocity trading
           const signalKey = `${signal.exchange}:${signal.symbol}:${signal.direction}`;
           const lastExecTime = lastExecutedMapRef.current[signalKey];
-          // High confidence (>0.7) = 8s cooldown, otherwise 12s cooldown
-          const cooldownMs = signal.confidence >= 0.7 ? 8000 : 12000;
+          // High confidence (>=0.8) = 2s cooldown, otherwise 4s cooldown
+          const cooldownMs = signal.confidence >= 0.8 ? 2000 : 4000;
           if (lastExecTime && Date.now() - lastExecTime < cooldownMs) {
             appendExecutionLog({
               type: 'BLOCKED',
-              message: `Cooldown: executed ${Math.floor((Date.now() - lastExecTime) / 1000)}s ago (need ${cooldownMs/1000}s)`,
+              message: `Cooldown: ${Math.floor((Date.now() - lastExecTime) / 1000)}s ago (need ${cooldownMs/1000}s)`,
               symbol: signal.symbol,
             });
             continue;
@@ -1014,7 +1023,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       
       appendExecutionLog({
         type: 'LOOP_TICK',
-        message: 'Trading bot STARTED - Loop: 3s, Profit check: 1s, AI scan: 5s',
+        message: '⚡ Trading bot STARTED - Loop: 1s, Profit: 500ms, AI: 2s (HIGH VELOCITY)',
       });
 
       // Clear any existing intervals first
@@ -1027,7 +1036,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       tradingLoopRef.current = setInterval(runTradingLoop, TRADING_LOOP_INTERVAL);
       profitCheckRef.current = setInterval(checkProfitTargets, PROFIT_CHECK_INTERVAL);
       
-      console.log('🤖 Trading bot started - Loop: 3s, Profit check: 1s, AI scan: 5s');
+      console.log('⚡ Trading bot started - Loop: 1s, Profit: 500ms, AI: 2s (HIGH VELOCITY MODE)');
     } catch (error) {
       console.error('Error starting bot:', error);
     }
@@ -1194,17 +1203,47 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     fetchAllData();
   }, [fetchAllData]);
 
-  // Connect WebSockets after exchanges are loaded
+  // ⚡ Initialize WebSocket Manager for real-time price streaming
   useEffect(() => {
     if (!loading && !initialConnectionMade.current) {
       initialConnectionMade.current = true;
+      
+      // Connect centralized WebSocket manager to all exchanges
+      console.log('⚡ Initializing WebSocket Manager for all exchanges...');
+      wsManager.connectAll();
+      
+      // Subscribe to real-time price updates
+      const unsubscribe = wsManager.onPriceUpdate((update: PriceUpdate) => {
+        setPrices(prev => ({ ...prev, [update.symbol]: update.price }));
+        setMarketData(prev => ({
+          ...prev,
+          [update.symbol]: {
+            symbol: update.symbol,
+            price: update.price,
+            change24h: update.change24h,
+            volume24h: update.volume24h,
+            high24h: update.high24h,
+            low24h: update.low24h,
+            volatility: update.high24h && update.low24h ? ((update.high24h - update.low24h) / update.low24h) * 100 : 0,
+            lastUpdate: new Date(update.timestamp),
+          },
+        }));
+      });
+      
+      // Also try legacy WebSocket for specific exchanges
       connectToExchange('binance');
       
+      // Start REST fallback if WebSockets don't connect
       setTimeout(() => {
-        if (!connectionStatesRef.current['binance']?.connected) {
+        if (!wsManager.isAnyConnected() && !connectionStatesRef.current['binance']?.connected) {
+          console.log('WebSockets not connected, starting REST fallback...');
           startRestFallback();
         }
       }, 5000);
+      
+      return () => {
+        unsubscribe();
+      };
     }
   }, [loading, connectToExchange, startRestFallback]);
 
