@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { useTrading } from '@/contexts/TradingContext';
-import { Wallet, TrendingUp, TrendingDown, RefreshCw, Clock } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, RefreshCw, Clock, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -9,6 +9,7 @@ export function PortfolioSummary() {
   const { balances, trades, exchanges, syncBalances, connectionStates } = useTrading();
   const [isSyncing, setIsSyncing] = useState(false);
   const [displayBalance, setDisplayBalance] = useState(0);
+  const [lastSyncAgo, setLastSyncAgo] = useState<string>('');
 
   // Calculate total balance from real exchange data
   const totalBalance = balances.reduce((sum, b) => sum + (b.total || 0), 0);
@@ -42,6 +43,27 @@ export function PortfolioSummary() {
     return () => clearInterval(interval);
   }, [totalBalance]);
 
+  // Update "last synced" timer every second
+  useEffect(() => {
+    const updateSyncAgo = () => {
+      if (balances.length === 0) {
+        setLastSyncAgo('Not synced');
+        return;
+      }
+      const lastSyncTime = new Date(Math.max(...balances.map(b => new Date(b.updated_at || 0).getTime())));
+      const diffSec = Math.floor((Date.now() - lastSyncTime.getTime()) / 1000);
+      
+      if (diffSec < 5) setLastSyncAgo('Just now');
+      else if (diffSec < 60) setLastSyncAgo(`${diffSec}s ago`);
+      else if (diffSec < 3600) setLastSyncAgo(`${Math.floor(diffSec / 60)}m ago`);
+      else setLastSyncAgo(`${Math.floor(diffSec / 3600)}h ago`);
+    };
+    
+    updateSyncAgo();
+    const interval = setInterval(updateSyncAgo, 1000);
+    return () => clearInterval(interval);
+  }, [balances]);
+
   const handleSync = async () => {
     setIsSyncing(true);
     try {
@@ -54,6 +76,7 @@ export function PortfolioSummary() {
   };
 
   const connectedExchanges = exchanges.filter(e => e.is_connected).length;
+  const hasKeys = exchanges.some(e => e.is_connected && e.api_key_encrypted);
   const lastSyncTime = balances.length > 0 
     ? new Date(Math.max(...balances.map(b => new Date(b.updated_at || 0).getTime())))
     : null;
@@ -96,12 +119,16 @@ export function PortfolioSummary() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          {lastSyncTime && (
-            <>
-              <Clock className="h-4 w-4" />
-              <span>Last synced: {lastSyncTime.toLocaleTimeString()}</span>
-            </>
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <div className="flex items-center gap-1">
+            <Clock className="h-4 w-4" />
+            <span>Synced: {lastSyncAgo}</span>
+          </div>
+          {hasKeys && (
+            <div className="flex items-center gap-1 text-primary">
+              <Zap className="h-3 w-3" />
+              <span className="text-xs">Auto-sync active</span>
+            </div>
           )}
         </div>
         <Button
@@ -112,7 +139,7 @@ export function PortfolioSummary() {
           className="gap-2"
         >
           <RefreshCw className={cn("h-4 w-4", isSyncing && "animate-spin")} />
-          {isSyncing ? 'Syncing...' : 'Sync Balances'}
+          {isSyncing ? 'Syncing...' : 'Sync Now'}
         </Button>
       </div>
 

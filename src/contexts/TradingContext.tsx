@@ -116,6 +116,7 @@ const PROFIT_CHECK_INTERVAL = 1000;
 const WATCHDOG_INTERVAL = 5000;
 const MAX_EXECUTION_LOGS = 200;
 const MAX_NEW_TRADES_PER_CYCLE = 2; // Execute up to 2 distinct signals per loop cycle
+const BALANCE_SYNC_INTERVAL = 30000; // Auto-sync balances every 30 seconds
 
 // LOWERED THRESHOLDS for more trading
 const THRESHOLDS = {
@@ -162,6 +163,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const backgroundScanRef = useRef<NodeJS.Timeout | null>(null);
   const profitCheckRef = useRef<NodeJS.Timeout | null>(null);
   const watchdogRef = useRef<NodeJS.Timeout | null>(null);
+  const balanceSyncRef = useRef<NodeJS.Timeout | null>(null);
   const initialConnectionMade = useRef(false);
   const connectionStatesRef = useRef<Record<string, ConnectionState>>({});
   const hasAutoSynced = useRef(false);
@@ -172,12 +174,18 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const lastExecutedMapRef = useRef<Record<string, number>>({});
   // Track which symbols we're currently subscribed to
   const subscribedSymbolsRef = useRef<Set<string>>(new Set());
+  // Track positions currently being closed to prevent duplicate closes
+  const closingPositionIdsRef = useRef<Set<string>>(new Set());
+  // Flag to prevent overlapping balance syncs
+  const isSyncingBalancesRef = useRef(false);
   
   // Stable refs for latest state
   const settingsRef = useRef<BotSettings | null>(null);
   const positionsRef = useRef<Position[]>([]);
   const signalsRef = useRef<TradingSignal[]>([]);
   const exchangesRef = useRef<Exchange[]>([]);
+  // Ref for runTradingLoop to break circular dependency
+  const runTradingLoopRef = useRef<() => Promise<void>>(() => Promise.resolve());
   
   // Keep refs in sync
   useEffect(() => { settingsRef.current = settings; }, [settings]);
@@ -622,7 +630,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     return grossPnL - entryFee - exitFee - fundingFee;
   }, []);
 
-  // Fast profit target checking - NOW WITH FEE-INCLUSIVE CALCULATION
+  // Fast profit target checking - STRICT TARGET (no buffer), with closing lock
   const checkProfitTargets = useCallback(async () => {
     if (!isRunningRef.current) return;
     const currentSettings = settingsRef.current;
@@ -633,6 +641,11 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     lastProfitCheckRef.current = now;
     
     for (const position of positionsRef.current) {
+      // Skip if already closing this position
+      if (closingPositionIdsRef.current.has(position.id)) {
+        continue;
+      }
+
       const profitTarget = position.trade_type === 'futures'
         ? currentSettings.futures_profit_target
         : currentSettings.spot_profit_target;
@@ -642,17 +655,18 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       
       // Calculate NET PnL including ALL fees (entry, exit, funding)
       const netPnL = calculateNetPnL(position, currentPrice);
-      
-      // Add 5% safety buffer to ensure we don't close at a loss due to slippage
-      const targetWithBuffer = profitTarget * 1.05;
 
-      if (netPnL >= targetWithBuffer) {
-        console.log(`🎯 Position ${position.symbol} hit NET profit target $${netPnL.toFixed(2)} >= $${targetWithBuffer.toFixed(2)}! Closing NOW...`);
+      // STRICT: Close exactly when netPnL >= profitTarget (no buffer)
+      if (netPnL >= profitTarget) {
+        console.log(`🎯 Position ${position.symbol} hit NET profit target $${netPnL.toFixed(2)} >= $${profitTarget.toFixed(2)}! Closing NOW...`);
+        
+        // Add to closing set to prevent duplicate close attempts
+        closingPositionIdsRef.current.add(position.id);
         setEngineStatus('trading');
         
         try {
           // Pass the exit price and require profit validation
-          await invokeWithRetry(() => 
+          const response = await invokeWithRetry(() => 
             supabase.functions.invoke('close-position', { 
               body: { 
                 positionId: position.id,
@@ -661,13 +675,30 @@ export function TradingProvider({ children }: { children: ReactNode }) {
               } 
             })
           );
+          
+          // Remove from local state immediately
           setPositions(prev => prev.filter(p => p.id !== position.id));
+          
+          // Check if already closed (treat as success)
+          const alreadyClosed = response?.alreadyClosed;
+          
           appendExecutionLog({
             type: 'TRADE_SUCCESS',
-            message: `Position closed at NET profit +$${netPnL.toFixed(2)} (target: +$${profitTarget})`,
+            message: alreadyClosed 
+              ? `Position was already closed` 
+              : `Position closed at NET profit +$${netPnL.toFixed(2)} (target: +$${profitTarget})`,
             symbol: position.symbol,
           });
           console.log(`✅ Position ${position.symbol} closed successfully with NET profit +$${netPnL.toFixed(2)}`);
+          
+          // CRITICAL: Immediately trigger trading loop to open new trades
+          setTimeout(() => {
+            if (isRunningRef.current) {
+              console.log('🔄 Position closed - immediately checking for new trade opportunities...');
+              runTradingLoopRef.current();
+            }
+          }, 100);
+          
         } catch (err) {
           console.error(`Failed to close position ${position.id}:`, err);
           appendExecutionLog({
@@ -675,6 +706,9 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             message: `Failed to close position: ${err instanceof Error ? err.message : 'Unknown error'}`,
             symbol: position.symbol,
           });
+        } finally {
+          // Always remove from closing set
+          closingPositionIdsRef.current.delete(position.id);
         }
       }
     }
@@ -1195,6 +1229,57 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     };
   }, [runBackgroundScan]);
 
+  // Auto balance sync loop - keeps balances updated continuously
+  useEffect(() => {
+    const hasConnectedExchangeWithKeys = exchanges.some(e => e.is_connected && e.api_key_encrypted);
+    
+    if (!hasConnectedExchangeWithKeys) {
+      // No exchanges with keys, clear interval if exists
+      if (balanceSyncRef.current) {
+        clearInterval(balanceSyncRef.current);
+        balanceSyncRef.current = null;
+      }
+      return;
+    }
+    
+    // Auto-sync function with guard against overlapping calls
+    const autoSyncBalances = async () => {
+      if (isSyncingBalancesRef.current) return;
+      
+      try {
+        isSyncingBalancesRef.current = true;
+        await invokeWithRetry(() => supabase.functions.invoke('sync-balances'));
+        
+        const { data } = await supabase.from('balances').select('*');
+        if (data) {
+          setBalances(data.map(b => ({
+            ...b,
+            available: Number(b.available),
+            locked: Number(b.locked),
+            total: Number(b.total),
+          })) as Balance[]);
+        }
+      } catch (error) {
+        console.error('Auto balance sync error:', error);
+      } finally {
+        isSyncingBalancesRef.current = false;
+      }
+    };
+    
+    // Start the interval
+    if (!balanceSyncRef.current) {
+      console.log('📊 Starting auto balance sync (every 30s)');
+      balanceSyncRef.current = setInterval(autoSyncBalances, BALANCE_SYNC_INTERVAL);
+    }
+    
+    return () => {
+      if (balanceSyncRef.current) {
+        clearInterval(balanceSyncRef.current);
+        balanceSyncRef.current = null;
+      }
+    };
+  }, [exchanges]);
+
   // Watchdog interval (stable)
   useEffect(() => {
     watchdogRef.current = setInterval(runWatchdog, WATCHDOG_INTERVAL);
@@ -1282,10 +1367,19 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         clearInterval(profitCheckRef.current);
         profitCheckRef.current = null;
       }
+      if (balanceSyncRef.current) {
+        clearInterval(balanceSyncRef.current);
+        balanceSyncRef.current = null;
+      }
     };
   }, [runHealthCheck]);
 
-  // Update position prices from WebSocket/REST data
+  // Keep runTradingLoopRef in sync
+  useEffect(() => {
+    runTradingLoopRef.current = runTradingLoop;
+  }, [runTradingLoop]);
+
+  // Update position prices from WebSocket/REST data - NOW WITH FEE-INCLUSIVE PNL
   useEffect(() => {
     if (positions.length === 0) return;
     
@@ -1295,14 +1389,23 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       if (!currentPrice || currentPrice === position.current_price) return position;
       
       hasUpdates = true;
-      let pnl: number;
+      
+      // Calculate NET PnL including ALL fees (same as checkProfitTargets)
+      const feeRate = position.trade_type === 'spot' ? 0.001 : 0.0005;
+      const entryFee = position.order_size_usd * feeRate;
+      const exitFee = position.order_size_usd * feeRate;
+      const fundingFee = position.trade_type === 'futures' ? position.order_size_usd * 0.0001 : 0;
+      
+      let grossPnL: number;
       if (position.direction === 'long') {
-        pnl = (currentPrice - position.entry_price) * position.quantity * (position.leverage || 1);
+        grossPnL = (currentPrice - position.entry_price) * position.quantity * (position.leverage || 1);
       } else {
-        pnl = (position.entry_price - currentPrice) * position.quantity * (position.leverage || 1);
+        grossPnL = (position.entry_price - currentPrice) * position.quantity * (position.leverage || 1);
       }
       
-      return { ...position, current_price: currentPrice, unrealized_pnl: pnl };
+      const netPnL = grossPnL - entryFee - exitFee - fundingFee;
+      
+      return { ...position, current_price: currentPrice, unrealized_pnl: netPnL };
     });
     
     if (hasUpdates) {

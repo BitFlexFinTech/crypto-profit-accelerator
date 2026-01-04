@@ -91,6 +91,38 @@ export default function PositionsPage() {
     return `~${Math.ceil(remainingSec / 3600)}h`;
   };
 
+  // Calculate required exit price for profit target with fee breakdown
+  const getTargetPriceInfo = (position: typeof positions[0]) => {
+    const feeRate = position.trade_type === 'spot' ? 0.001 : 0.0005;
+    const entryFee = position.order_size_usd * feeRate;
+    const exitFee = position.order_size_usd * feeRate;
+    const fundingFee = position.trade_type === 'futures' ? position.order_size_usd * 0.0001 : 0;
+    const totalFees = entryFee + exitFee + fundingFee;
+    
+    const requiredGrossProfit = position.profit_target + totalFees;
+    const leverage = position.leverage || 1;
+    const priceMovementNeeded = requiredGrossProfit / (position.quantity * leverage);
+    
+    let targetPrice: number;
+    if (position.direction === 'long') {
+      targetPrice = position.entry_price + priceMovementNeeded;
+    } else {
+      targetPrice = position.entry_price - priceMovementNeeded;
+    }
+    
+    const priceChangePercent = (priceMovementNeeded / position.entry_price) * 100;
+    
+    return {
+      targetPrice,
+      priceMovement: priceMovementNeeded,
+      priceChangePercent,
+      entryFee,
+      exitFee,
+      fundingFee,
+      totalFees,
+    };
+  };
+
   // Calculate positions at loss for Close All warning
   const losingPositions = positions.filter(p => p.unrealized_pnl < 0);
   const totalLoss = losingPositions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
@@ -219,6 +251,31 @@ export default function PositionsPage() {
                                 <p className="font-mono text-foreground">${position.order_size_usd.toFixed(2)}</p>
                               </div>
                             </div>
+
+                            {/* Progress bar */}
+                            {/* Profit Target Calculator with Fee Breakdown */}
+                            {(() => {
+                              const targetInfo = getTargetPriceInfo(position);
+                              return (
+                                <div className="mt-3 p-2 rounded bg-background/50 border border-border/50">
+                                  <div className="flex flex-wrap items-center gap-3 text-xs">
+                                    <span className="text-muted-foreground">
+                                      Target Exit: <span className="text-foreground font-medium">${targetInfo.targetPrice.toFixed(4)}</span>
+                                    </span>
+                                    <span className="text-muted-foreground">
+                                      Need: <span className={`font-medium ${position.direction === 'long' ? 'text-primary' : 'text-destructive'}`}>
+                                        {position.direction === 'long' ? '+' : '-'}${Math.abs(targetInfo.priceMovement).toFixed(4)} ({targetInfo.priceChangePercent.toFixed(3)}%)
+                                      </span>
+                                    </span>
+                                    <span className="text-muted-foreground">
+                                      Fees: <span className="text-foreground">
+                                        entry ${targetInfo.entryFee.toFixed(2)} | exit ${targetInfo.exitFee.toFixed(2)}{targetInfo.fundingFee > 0 && ` | funding ${targetInfo.fundingFee.toFixed(2)}`} (total ${targetInfo.totalFees.toFixed(2)})
+                                      </span>
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })()}
 
                             {/* Progress bar */}
                             <div className="mt-3 space-y-1">
