@@ -191,6 +191,22 @@ export function useTrades() {
       .reduce((sum, t) => sum + (t.entry_fee || 0) + (t.exit_fee || 0) + (t.funding_fee || 0), 0);
   };
 
+  const getCumulativePnLData = (): { date: string; cumulativeProfit: number; trade: string }[] => {
+    const closedTrades = trades
+      .filter(t => t.status === 'closed' && t.closed_at && t.net_profit !== undefined)
+      .sort((a, b) => new Date(a.closed_at!).getTime() - new Date(b.closed_at!).getTime());
+    
+    let cumulative = 0;
+    return closedTrades.map(t => {
+      cumulative += t.net_profit || 0;
+      return {
+        date: new Date(t.closed_at!).toLocaleString(),
+        cumulativeProfit: cumulative,
+        trade: `${t.symbol} ${t.direction}`,
+      };
+    });
+  };
+
   return {
     trades,
     dailyStats,
@@ -206,6 +222,7 @@ export function useTrades() {
     getProfitByDirection,
     getClosedTradesCount,
     getTotalFees,
+    getCumulativePnLData,
     refetch: fetchTrades,
   };
 }

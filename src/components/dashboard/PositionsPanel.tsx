@@ -100,6 +100,38 @@ export function PositionsPanel() {
     return `~${Math.ceil(remainingSec / 3600)}h`;
   };
 
+  // Calculate required exit price for profit target
+  const getTargetPriceInfo = (position: typeof positions[0]) => {
+    const feeRate = position.trade_type === 'spot' ? 0.001 : 0.0005;
+    const entryFee = position.order_size_usd * feeRate;
+    const exitFee = position.order_size_usd * feeRate;
+    const fundingFee = position.trade_type === 'futures' ? position.order_size_usd * 0.0001 : 0;
+    const totalFees = entryFee + exitFee + fundingFee;
+    
+    // Required gross profit to achieve target after fees
+    const requiredGrossProfit = position.profit_target + totalFees;
+    
+    // Calculate target price based on direction
+    const leverage = position.leverage || 1;
+    const priceMovementNeeded = requiredGrossProfit / (position.quantity * leverage);
+    
+    let targetPrice: number;
+    if (position.direction === 'long') {
+      targetPrice = position.entry_price + priceMovementNeeded;
+    } else {
+      targetPrice = position.entry_price - priceMovementNeeded;
+    }
+    
+    const priceChangePercent = (priceMovementNeeded / position.entry_price) * 100;
+    
+    return {
+      targetPrice,
+      priceMovement: priceMovementNeeded,
+      priceChangePercent,
+      totalFees,
+    };
+  };
+
   if (loading) {
     return (
       <Card className="bg-card border-border">
@@ -189,6 +221,25 @@ export function PositionsPanel() {
                             </span>
                             {position.leverage && position.leverage > 1 && <span>{position.leverage}x</span>}
                           </div>
+                          {/* Profit Target Calculator */}
+                          {(() => {
+                            const targetInfo = getTargetPriceInfo(position);
+                            return (
+                              <div className="flex items-center gap-3 text-xs mt-1">
+                                <span className="text-muted-foreground">
+                                  Target Price: <span className="text-foreground font-medium">${targetInfo.targetPrice.toFixed(4)}</span>
+                                </span>
+                                <span className="text-muted-foreground">
+                                  Need: <span className={`font-medium ${position.direction === 'long' ? 'text-primary' : 'text-destructive'}`}>
+                                    {position.direction === 'long' ? '+' : '-'}${Math.abs(targetInfo.priceMovement).toFixed(4)} ({targetInfo.priceChangePercent.toFixed(3)}%)
+                                  </span>
+                                </span>
+                                <span className="text-muted-foreground">
+                                  Fees: <span className="text-foreground">${targetInfo.totalFees.toFixed(2)}</span>
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                       
