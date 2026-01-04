@@ -72,8 +72,9 @@ export function usePositions() {
     closingPositionsRef.current.add(positionId);
 
     try {
+      // STRICT RULE: Always require profit when closing positions
       const { data, error } = await supabase.functions.invoke('close-position', {
-        body: { positionId },
+        body: { positionId, requireProfit: true },
       });
 
       if (error) throw error;
@@ -104,8 +105,9 @@ export function usePositions() {
   const closeAllPositions = async () => {
     try {
       for (const position of positions) {
+        // STRICT RULE: Always require profit when closing positions
         await supabase.functions.invoke('close-position', {
-          body: { positionId: position.id },
+          body: { positionId: position.id, requireProfit: true },
         });
       }
 

@@ -17,6 +17,8 @@ import { SignalDebugPanel } from '@/components/dashboard/cards/SignalDebugPanel'
 import { TradeExecutionLogPanel } from '@/components/dashboard/cards/TradeExecutionLogPanel';
 import { TradePerformancePanel } from '@/components/dashboard/cards/TradePerformancePanel';
 import { PairPerformanceLeaderboard } from '@/components/dashboard/cards/PairPerformanceLeaderboard';
+import { WebSocketStatusPanel } from '@/components/dashboard/cards/WebSocketStatusPanel';
+import { TradeVelocityDashboard } from '@/components/dashboard/cards/TradeVelocityDashboard';
 
 export default function DashboardPage() {
   return (
@@ -40,6 +42,12 @@ export default function DashboardPage() {
       <div className="flex-1 overflow-auto p-3 space-y-3">
         {/* Stats Row - Full Width */}
         <StatsCards />
+        
+        {/* NEW: WebSocket Status & Trade Velocity Dashboard */}
+        <div className="grid gap-3 lg:grid-cols-2">
+          <WebSocketStatusPanel />
+          <TradeVelocityDashboard />
+        </div>
         
         {/* Performance Row */}
         <div className="grid gap-3 lg:grid-cols-2">
