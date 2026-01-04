@@ -109,6 +109,88 @@ export function useTrades() {
     return dailyStats.find(s => s.date === today) || null;
   };
 
+  const getAverageProfit = (): number => {
+    const closedTrades = trades.filter(t => t.status === 'closed' && t.net_profit !== undefined);
+    if (closedTrades.length === 0) return 0;
+    const totalProfit = closedTrades.reduce((sum, t) => sum + (t.net_profit || 0), 0);
+    return totalProfit / closedTrades.length;
+  };
+
+  const getAverageTimeToTarget = (): number => {
+    const winningTrades = trades.filter(
+      t => t.status === 'closed' && (t.net_profit || 0) > 0 && t.opened_at && t.closed_at
+    );
+    if (winningTrades.length === 0) return 0;
+    
+    const totalMs = winningTrades.reduce((sum, t) => {
+      const openedAt = new Date(t.opened_at!).getTime();
+      const closedAt = new Date(t.closed_at!).getTime();
+      return sum + (closedAt - openedAt);
+    }, 0);
+    
+    return totalMs / winningTrades.length;
+  };
+
+  const getBestTrade = (): Trade | null => {
+    const closedTrades = trades.filter(t => t.status === 'closed' && t.net_profit !== undefined);
+    if (closedTrades.length === 0) return null;
+    return closedTrades.reduce((best, t) => 
+      (t.net_profit || 0) > (best.net_profit || 0) ? t : best
+    );
+  };
+
+  const getWorstTrade = (): Trade | null => {
+    const closedTrades = trades.filter(t => t.status === 'closed' && t.net_profit !== undefined);
+    if (closedTrades.length === 0) return null;
+    return closedTrades.reduce((worst, t) => 
+      (t.net_profit || 0) < (worst.net_profit || 0) ? t : worst
+    );
+  };
+
+  const getProfitBySymbol = (): Record<string, { profit: number; count: number }> => {
+    const bySymbol: Record<string, { profit: number; count: number }> = {};
+    
+    trades
+      .filter(t => t.status === 'closed')
+      .forEach(t => {
+        if (!bySymbol[t.symbol]) {
+          bySymbol[t.symbol] = { profit: 0, count: 0 };
+        }
+        bySymbol[t.symbol].profit += t.net_profit || 0;
+        bySymbol[t.symbol].count += 1;
+      });
+    
+    return bySymbol;
+  };
+
+  const getProfitByDirection = (): { long: number; short: number; longCount: number; shortCount: number } => {
+    const result = { long: 0, short: 0, longCount: 0, shortCount: 0 };
+    
+    trades
+      .filter(t => t.status === 'closed')
+      .forEach(t => {
+        if (t.direction === 'long') {
+          result.long += t.net_profit || 0;
+          result.longCount += 1;
+        } else {
+          result.short += t.net_profit || 0;
+          result.shortCount += 1;
+        }
+      });
+    
+    return result;
+  };
+
+  const getClosedTradesCount = (): number => {
+    return trades.filter(t => t.status === 'closed').length;
+  };
+
+  const getTotalFees = (): number => {
+    return trades
+      .filter(t => t.status === 'closed')
+      .reduce((sum, t) => sum + (t.entry_fee || 0) + (t.exit_fee || 0) + (t.funding_fee || 0), 0);
+  };
+
   return {
     trades,
     dailyStats,
@@ -116,6 +198,14 @@ export function useTrades() {
     getWinRate,
     getTotalProfit,
     getTodayStats,
+    getAverageProfit,
+    getAverageTimeToTarget,
+    getBestTrade,
+    getWorstTrade,
+    getProfitBySymbol,
+    getProfitByDirection,
+    getClosedTradesCount,
+    getTotalFees,
     refetch: fetchTrades,
   };
 }

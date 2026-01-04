@@ -15,6 +15,7 @@ import { RealTimePnL } from '@/components/dashboard/cards/RealTimePnL';
 import { SignalDebugPanel } from '@/components/dashboard/cards/SignalDebugPanel';
 import { TradeVelocityChart } from '@/components/dashboard/cards/TradeVelocityChart';
 import { TradeExecutionLogPanel } from '@/components/dashboard/cards/TradeExecutionLogPanel';
+import { TradePerformancePanel } from '@/components/dashboard/cards/TradePerformancePanel';
 
 export default function DashboardPage() {
   return (
@@ -34,6 +35,9 @@ export default function DashboardPage() {
       </div>
 
       <StatsCards />
+      
+      {/* Historical Trade Performance - Full Width */}
+      <TradePerformancePanel />
       
       {/* Debug & Execution Panels - Full Width */}
       <SignalDebugPanel />

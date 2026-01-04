@@ -73,6 +73,12 @@ export function BotControls() {
     }
   };
 
+  // Calculate loss statistics for kill switch warning
+  const profitablePositions = positions.filter(p => p.unrealized_pnl >= 0);
+  const losingPositions = positions.filter(p => p.unrealized_pnl < 0);
+  const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+  const totalLoss = losingPositions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+
   return (
     <>
       <div className="flex items-center gap-3">
@@ -125,12 +131,38 @@ export function BotControls() {
               <AlertTriangle className="h-5 w-5" />
               Emergency Kill Switch
             </AlertDialogTitle>
-            <AlertDialogDescription className="space-y-2">
+            <AlertDialogDescription className="space-y-3">
               <p>This will immediately:</p>
               <ul className="list-disc list-inside space-y-1 text-sm">
                 <li>Stop the trading bot</li>
                 <li>Close all {positions.length} open position{positions.length !== 1 ? 's' : ''}</li>
               </ul>
+              
+              {positions.length > 0 && (
+                <div className="mt-4 p-3 rounded-lg bg-secondary/50 border border-border space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Profitable positions:</span>
+                    <span className="text-primary font-medium">{profitablePositions.length}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Losing positions:</span>
+                    <span className="text-destructive font-medium">{losingPositions.length}</span>
+                  </div>
+                  <div className="border-t border-border my-2" />
+                  <div className="flex justify-between text-sm font-medium">
+                    <span className="text-muted-foreground">Total unrealized P&L:</span>
+                    <span className={totalUnrealizedPnl >= 0 ? 'text-primary' : 'text-destructive'}>
+                      {totalUnrealizedPnl >= 0 ? '+' : ''}${totalUnrealizedPnl.toFixed(2)}
+                    </span>
+                  </div>
+                  {losingPositions.length > 0 && (
+                    <p className="text-xs text-destructive mt-2">
+                      ⚠️ Closing now will realize ${Math.abs(totalLoss).toFixed(2)} in losses from {losingPositions.length} position{losingPositions.length !== 1 ? 's' : ''}.
+                    </p>
+                  )}
+                </div>
+              )}
+
               <p className="font-medium text-foreground mt-3">
                 Are you sure you want to proceed?
               </p>
