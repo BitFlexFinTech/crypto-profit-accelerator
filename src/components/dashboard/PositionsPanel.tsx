@@ -4,11 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Progress } from '@/components/ui/progress';
-import { X, TrendingUp, TrendingDown, AlertTriangle, Clock, Target, Loader2 } from 'lucide-react';
+import { X, TrendingUp, TrendingDown, AlertTriangle, Loader2 } from 'lucide-react';
 import { EXCHANGE_CONFIGS } from '@/types/trading';
 import { toast } from 'sonner';
-import { formatDistanceToNow } from 'date-fns';
+import { ProfitProgressIndicator } from './cards/ProfitProgressIndicator';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -78,27 +77,7 @@ export function PositionsPanel() {
     }
   };
 
-  // Calculate ETA to profit target
-  const getETA = (position: typeof positions[0]) => {
-    if (!position.opened_at) return null;
-    const elapsedMs = Date.now() - new Date(position.opened_at).getTime();
-    const elapsedSec = elapsedMs / 1000;
-    
-    // Need at least 15 seconds of data and positive progress
-    if (elapsedSec < 15 || position.unrealized_pnl <= 0) return null;
-    
-    const pnlRatePerSec = position.unrealized_pnl / elapsedSec;
-    if (pnlRatePerSec <= 0) return null;
-    
-    const remainingPnl = position.profit_target - position.unrealized_pnl;
-    if (remainingPnl <= 0) return 'Target hit!';
-    
-    const remainingSec = remainingPnl / pnlRatePerSec;
-    
-    if (remainingSec < 60) return `~${Math.ceil(remainingSec)}s`;
-    if (remainingSec < 3600) return `~${Math.ceil(remainingSec / 60)}m`;
-    return `~${Math.ceil(remainingSec / 3600)}h`;
-  };
+  // ETA calculation moved to ProfitProgressIndicator component
 
   // Calculate required exit price for profit target with fee breakdown
   const getTargetPriceInfo = (position: typeof positions[0]) => {
@@ -186,9 +165,7 @@ export function PositionsPanel() {
                 const pnlPercent = position.entry_price > 0 
                   ? ((position.unrealized_pnl / position.order_size_usd) * 100)
                   : 0;
-                const targetProgress = Math.min(100, Math.max(0, (position.unrealized_pnl / position.profit_target) * 100));
                 const currentPrice = prices[position.symbol] || position.current_price;
-                const eta = getETA(position);
                 const isThisClosing = closingPositionId === position.id;
                 
                 return (
@@ -274,33 +251,14 @@ export function PositionsPanel() {
                       </div>
                     </div>
 
-                    {/* Progress bar to target */}
-                    <div className="mt-2 space-y-1">
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <div className="flex items-center gap-1">
-                          <Target className="h-3 w-3" />
-                          <span>Target: ${position.profit_target.toFixed(2)}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className={targetProgress >= 100 ? 'text-primary font-medium' : ''}>
-                            {targetProgress.toFixed(0)}%
-                          </span>
-                          {eta && (
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              ETA: {eta}
-                            </span>
-                          )}
-                          {position.opened_at && (
-                            <span>
-                              {formatDistanceToNow(new Date(position.opened_at))} ago
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <Progress 
-                        value={targetProgress} 
-                        className={`h-2 ${targetProgress >= 100 ? '[&>div]:bg-primary' : targetProgress > 50 ? '[&>div]:bg-chart-2' : '[&>div]:bg-chart-3'}`}
+                    {/* Real-time Progress Indicator with Countdown */}
+                    <div className="mt-2">
+                      <ProfitProgressIndicator
+                        currentPnl={position.unrealized_pnl}
+                        profitTarget={position.profit_target}
+                        openedAt={position.opened_at}
+                        symbol={position.symbol}
+                        isClosing={isThisClosing}
                       />
                     </div>
                   </div>

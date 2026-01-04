@@ -897,13 +897,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             continue;
           }
 
-          // Check per-signal cooldown (prevent same signal within 15 seconds)
+          // Check per-signal cooldown (FASTER for high-confidence signals)
           const signalKey = `${signal.exchange}:${signal.symbol}:${signal.direction}`;
           const lastExecTime = lastExecutedMapRef.current[signalKey];
-          if (lastExecTime && Date.now() - lastExecTime < 15000) {
+          // High confidence (>0.7) = 8s cooldown, otherwise 12s cooldown
+          const cooldownMs = signal.confidence >= 0.7 ? 8000 : 12000;
+          if (lastExecTime && Date.now() - lastExecTime < cooldownMs) {
             appendExecutionLog({
               type: 'BLOCKED',
-              message: `Cooldown: executed ${Math.floor((Date.now() - lastExecTime) / 1000)}s ago`,
+              message: `Cooldown: executed ${Math.floor((Date.now() - lastExecTime) / 1000)}s ago (need ${cooldownMs/1000}s)`,
               symbol: signal.symbol,
             });
             continue;
