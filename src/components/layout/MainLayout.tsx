@@ -1,8 +1,7 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
-import { LayoutDashboard, TrendingUp, History, Settings, LogOut, Zap } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, History, Settings, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -13,7 +12,6 @@ const navItems = [
 ];
 
 export function MainLayout({ children }: { children: ReactNode }) {
-  const { signOut } = useAuth();
   const location = useLocation();
 
   return (
@@ -43,9 +41,6 @@ export function MainLayout({ children }: { children: ReactNode }) {
                 ))}
               </div>
             </div>
-            <Button variant="ghost" size="icon" onClick={signOut}>
-              <LogOut className="h-4 w-4" />
-            </Button>
           </div>
         </div>
       </nav>

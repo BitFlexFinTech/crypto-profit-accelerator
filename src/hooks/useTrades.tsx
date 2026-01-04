@@ -1,30 +1,24 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from './useAuth';
 import { Trade, DailyStats } from '@/types/trading';
 
 export function useTrades() {
-  const { user } = useAuth();
   const [trades, setTrades] = useState<Trade[]>([]);
   const [dailyStats, setDailyStats] = useState<DailyStats[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user) {
-      fetchTrades();
-      fetchDailyStats();
-      subscribeToTrades();
-    }
-  }, [user]);
+    fetchTrades();
+    fetchDailyStats();
+    const cleanup = subscribeToTrades();
+    return cleanup;
+  }, []);
 
   const fetchTrades = async () => {
-    if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('trades')
         .select('*')
-        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -51,13 +45,10 @@ export function useTrades() {
   };
 
   const fetchDailyStats = async () => {
-    if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('daily_stats')
         .select('*')
-        .eq('user_id', user.id)
         .order('date', { ascending: false })
         .limit(30);
 
@@ -79,8 +70,6 @@ export function useTrades() {
   };
 
   const subscribeToTrades = () => {
-    if (!user) return;
-
     const channel = supabase
       .channel('trades-changes')
       .on(
@@ -89,7 +78,6 @@ export function useTrades() {
           event: '*',
           schema: 'public',
           table: 'trades',
-          filter: `user_id=eq.${user.id}`,
         },
         () => {
           fetchTrades();

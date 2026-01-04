@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from './useAuth';
 import { Exchange, Balance, ExchangeName } from '@/types/trading';
 import { useToast } from '@/hooks/use-toast';
 
+const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
+
 export function useExchanges() {
-  const { user } = useAuth();
   const { toast } = useToast();
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const [balances, setBalances] = useState<Balance[]>([]);
@@ -13,20 +13,15 @@ export function useExchanges() {
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      fetchExchanges();
-      fetchBalances();
-    }
-  }, [user]);
+    fetchExchanges();
+    fetchBalances();
+  }, []);
 
   const fetchExchanges = async () => {
-    if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('exchanges')
-        .select('*')
-        .eq('user_id', user.id);
+        .select('*');
 
       if (error) throw error;
       setExchanges((data || []) as Exchange[]);
@@ -38,13 +33,10 @@ export function useExchanges() {
   };
 
   const fetchBalances = async () => {
-    if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('balances')
-        .select('*')
-        .eq('user_id', user.id);
+        .select('*');
 
       if (error) throw error;
       setBalances((data || []).map(b => ({
@@ -64,14 +56,10 @@ export function useExchanges() {
     apiSecret: string,
     passphrase?: string
   ) => {
-    if (!user) return;
-
     try {
-      // Check if exchange already exists
       const existing = exchanges.find(e => e.exchange === exchangeName);
       
       if (existing) {
-        // Update existing
         const { error } = await supabase
           .from('exchanges')
           .update({
@@ -84,11 +72,10 @@ export function useExchanges() {
 
         if (error) throw error;
       } else {
-        // Insert new
         const { error } = await supabase
           .from('exchanges')
           .insert({
-            user_id: user.id,
+            user_id: DEFAULT_USER_ID,
             exchange: exchangeName,
             api_key_encrypted: apiKey,
             api_secret_encrypted: apiSecret,
@@ -168,11 +155,8 @@ export function useExchanges() {
   };
 
   const syncBalances = async () => {
-    if (!user) return;
-    
     setSyncing(true);
     try {
-      // Call edge function to sync balances from all connected exchanges
       const { data, error } = await supabase.functions.invoke('sync-balances');
       
       if (error) throw error;
@@ -205,6 +189,12 @@ export function useExchanges() {
     return balances.reduce((sum, b) => sum + b.total, 0);
   };
 
+  const getConnectedExchangeNames = (): ExchangeName[] => {
+    return exchanges
+      .filter(e => e.is_connected)
+      .map(e => e.exchange as ExchangeName);
+  };
+
   return {
     exchanges,
     balances,
@@ -216,6 +206,7 @@ export function useExchanges() {
     syncBalances,
     getExchangeBalance,
     getTotalBalance,
+    getConnectedExchangeNames,
     refetch: fetchExchanges,
   };
 }
