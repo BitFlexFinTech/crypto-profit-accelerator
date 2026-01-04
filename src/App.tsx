@@ -8,13 +8,9 @@ import { TradingProvider } from "@/contexts/TradingContext";
 import DashboardPage from "@/pages/Dashboard";
 import PortfolioPage from "@/pages/Portfolio";
 import AnalyticsPage from "@/pages/Analytics";
-import ChartsPage from "@/pages/Charts";
 import PositionsPage from "@/pages/Positions";
-import HistoryPage from "@/pages/History";
 import SettingsPage from "@/pages/Settings";
 import RiskManagementPage from "@/pages/RiskManagement";
-import TradeAnalyticsPage from "@/pages/TradeAnalytics";
-import PerformanceAnalyticsPage from "@/pages/PerformanceAnalytics";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -41,12 +37,8 @@ const App = () => (
               <Route path="/" element={<MainLayout><DashboardPage /></MainLayout>} />
               <Route path="/portfolio" element={<MainLayout><PortfolioPage /></MainLayout>} />
               <Route path="/analytics" element={<MainLayout><AnalyticsPage /></MainLayout>} />
-              <Route path="/charts" element={<MainLayout><ChartsPage /></MainLayout>} />
               <Route path="/positions" element={<MainLayout><PositionsPage /></MainLayout>} />
-              <Route path="/history" element={<MainLayout><HistoryPage /></MainLayout>} />
               <Route path="/risk-management" element={<MainLayout><RiskManagementPage /></MainLayout>} />
-              <Route path="/trade-analytics" element={<MainLayout><TradeAnalyticsPage /></MainLayout>} />
-              <Route path="/performance" element={<MainLayout><PerformanceAnalyticsPage /></MainLayout>} />
               <Route path="/settings" element={<MainLayout><SettingsPage /></MainLayout>} />
               <Route path="*" element={<NotFound />} />
             </Routes>

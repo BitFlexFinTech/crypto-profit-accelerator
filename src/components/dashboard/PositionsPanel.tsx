@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { TrendingUp, TrendingDown, AlertTriangle, Loader2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertTriangle, Loader2, X } from 'lucide-react';
 import { EXCHANGE_CONFIGS } from '@/types/trading';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -162,24 +162,34 @@ export function PositionsPanel() {
                             {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
                           </div>
                         </div>
-                        {canClose ? (
+                        <div className="flex items-center gap-1">
                           <Button
-                            variant="default"
+                            variant={canClose ? "default" : "outline"}
                             size="sm"
                             onClick={() => handleClosePosition(position.id, position.unrealized_pnl, position.profit_target, position.symbol)}
-                            disabled={isClosing}
-                            className="h-5 px-1.5 text-[10px] gap-0.5 bg-primary hover:bg-primary/90"
+                            disabled={isClosing || !canClose}
+                            className={cn(
+                              "h-5 px-1.5 text-[10px] gap-0.5",
+                              canClose 
+                                ? "bg-primary hover:bg-primary/90" 
+                                : "opacity-50 cursor-not-allowed"
+                            )}
                           >
-                            {isClosing ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <TrendingUp className="h-2.5 w-2.5" />}
-                            TP
+                            {isClosing ? (
+                              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                            ) : canClose ? (
+                              <TrendingUp className="h-2.5 w-2.5" />
+                            ) : (
+                              <X className="h-2.5 w-2.5" />
+                            )}
+                            Close
                           </Button>
-                        ) : (
-                          <div className="w-10 text-center">
-                            <div className="text-[8px] text-muted-foreground">
-                              +${position.profit_target.toFixed(0)}
-                            </div>
-                          </div>
-                        )}
+                          {!canClose && (
+                            <span className="text-[8px] text-muted-foreground whitespace-nowrap">
+                              +${(position.profit_target - position.unrealized_pnl).toFixed(2)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     

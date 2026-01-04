@@ -3,17 +3,13 @@ import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   TrendingUp, 
-  History, 
   Settings, 
   Zap, 
-  BarChart3,
   PieChart,
   Wallet,
   ChevronLeft,
   ChevronRight,
-  Shield,
-  LineChart,
-  Target
+  Shield
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -22,12 +18,8 @@ const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/portfolio', label: 'Portfolio', icon: Wallet },
   { path: '/analytics', label: 'Analytics', icon: PieChart },
-  { path: '/performance', label: 'Performance', icon: Target },
-  { path: '/charts', label: 'Charts', icon: BarChart3 },
   { path: '/positions', label: 'Positions', icon: TrendingUp },
-  { path: '/history', label: 'History', icon: History },
   { path: '/risk-management', label: 'Risk', icon: Shield },
-  { path: '/trade-analytics', label: 'Trade Stats', icon: LineChart },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
