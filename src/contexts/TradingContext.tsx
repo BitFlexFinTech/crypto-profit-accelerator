@@ -115,8 +115,8 @@ const TRADING_LOOP_INTERVAL = 3000;
 const PROFIT_CHECK_INTERVAL = 1000;
 const WATCHDOG_INTERVAL = 5000;
 const MAX_EXECUTION_LOGS = 200;
-const MAX_NEW_TRADES_PER_CYCLE = 2; // Execute up to 2 distinct signals per loop cycle
-const BALANCE_SYNC_INTERVAL = 30000; // Auto-sync balances every 30 seconds
+const MAX_NEW_TRADES_PER_CYCLE = 3; // Execute up to 3 distinct signals per loop cycle for diversification
+const BALANCE_SYNC_INTERVAL = 10000; // Auto-sync balances every 10 seconds for real-time updates
 
 // LOWERED THRESHOLDS for more trading
 const THRESHOLDS = {
@@ -1108,11 +1108,17 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Close position
+  // Close position - STRICT: Always requires profit
   const closePosition = useCallback(async (positionId: string) => {
     try {
+      // STRICT: Always require profit validation
       await invokeWithRetry(() => 
-        supabase.functions.invoke('close-position', { body: { positionId } })
+        supabase.functions.invoke('close-position', { 
+          body: { 
+            positionId,
+            requireProfit: true, // STRICT: Never close at a loss
+          } 
+        })
       );
       setPositions(prev => prev.filter(p => p.id !== positionId));
     } catch (error) {
@@ -1121,19 +1127,41 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Close all positions
+  // Close all positions - STRICT: Only closes profitable positions
   const closeAllPositions = useCallback(async () => {
+    const currentPositions = positionsRef.current;
+    const currentSettings = settingsRef.current;
+    
+    // Filter to only positions that have reached their profit target
+    const profitablePositions = currentPositions.filter(p => {
+      const target = p.trade_type === 'futures' 
+        ? (currentSettings?.futures_profit_target || 3) 
+        : (currentSettings?.spot_profit_target || 1);
+      return p.unrealized_pnl >= target;
+    });
+    
+    if (profitablePositions.length === 0) {
+      console.log('No positions at profit target to close');
+      return;
+    }
+    
     try {
       await Promise.all(
-        positionsRef.current.map(p => 
+        profitablePositions.map(p => 
           invokeWithRetry(() => 
-            supabase.functions.invoke('close-position', { body: { positionId: p.id } })
+            supabase.functions.invoke('close-position', { 
+              body: { 
+                positionId: p.id,
+                requireProfit: true, // STRICT: Never close at a loss
+              } 
+            })
           )
         )
       );
-      setPositions([]);
+      // Remove only closed positions from state
+      setPositions(prev => prev.filter(p => !profitablePositions.find(pp => pp.id === p.id)));
     } catch (error) {
-      console.error('Error closing all positions:', error);
+      console.error('Error closing profitable positions:', error);
       throw error;
     }
   }, []);

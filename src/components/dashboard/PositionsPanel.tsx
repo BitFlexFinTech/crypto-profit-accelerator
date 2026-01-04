@@ -4,25 +4,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { X, TrendingUp, TrendingDown, AlertTriangle, Loader2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertTriangle, Loader2 } from 'lucide-react';
 import { EXCHANGE_CONFIGS } from '@/types/trading';
 import { toast } from 'sonner';
 import { ProfitProgressIndicator } from './cards/ProfitProgressIndicator';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 
 export function PositionsPanel() {
   const { positions, loading, closePosition, closeAllPositions, exchanges, prices } = useTrading();
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
-  const [lossConfirmPosition, setLossConfirmPosition] = useState<{ id: string; pnl: number; symbol: string } | null>(null);
   const [isClosing, setIsClosing] = useState(false);
 
   const getExchangeName = (exchangeId?: string) => {
@@ -43,10 +32,14 @@ export function PositionsPanel() {
 
   const totalPnl = positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
 
-  const handleClosePosition = async (positionId: string, pnl: number, symbol: string) => {
-    // If position is at a loss, show confirmation dialog
-    if (pnl < 0) {
-      setLossConfirmPosition({ id: positionId, pnl, symbol });
+  // STRICT RULE: Cannot close at a loss - only profitable positions can be closed
+  const handleClosePosition = async (positionId: string, pnl: number, profitTarget: number, symbol: string) => {
+    // STRICT: Only allow closing if position is at or above profit target
+    if (pnl < profitTarget) {
+      toast.error(`Cannot close ${symbol} yet`, {
+        description: `Position must reach profit target (+$${profitTarget.toFixed(2)}). Current: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`,
+        dismissible: true,
+      });
       return;
     }
     
@@ -58,20 +51,34 @@ export function PositionsPanel() {
     setIsClosing(true);
     try {
       await closePosition(positionId);
-      toast.success('Position Closed', { dismissible: true });
+      toast.success('Position Closed at Profit Target', { dismissible: true });
     } catch {
       toast.error('Failed to close position', { dismissible: true });
     } finally {
       setClosingPositionId(null);
       setIsClosing(false);
-      setLossConfirmPosition(null);
     }
   };
 
+  // STRICT: Close All only closes profitable positions
   const handleCloseAll = async () => {
+    const profitablePositions = positions.filter(p => p.unrealized_pnl >= p.profit_target);
+    const unprofitableCount = positions.length - profitablePositions.length;
+    
+    if (profitablePositions.length === 0) {
+      toast.error('No positions at profit target', {
+        description: `${unprofitableCount} position(s) still waiting to reach target`,
+        dismissible: true,
+      });
+      return;
+    }
+    
     try {
       await closeAllPositions();
-      toast.success('All Positions Closed', { dismissible: true });
+      toast.success(`Closed ${profitablePositions.length} profitable position(s)`, {
+        description: unprofitableCount > 0 ? `${unprofitableCount} still waiting for target` : undefined,
+        dismissible: true,
+      });
     } catch {
       toast.error('Failed to close positions', { dismissible: true });
     }
@@ -234,20 +241,27 @@ export function PositionsPanel() {
                             {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
                           </div>
                         </div>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleClosePosition(position.id, position.unrealized_pnl, position.symbol)}
-                          disabled={isThisClosing}
-                          className="gap-1"
-                        >
-                          {isThisClosing ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <X className="h-4 w-4" />
-                          )}
-                          Close
-                        </Button>
+                        {/* STRICT: Only show close button if at profit target */}
+                        {position.unrealized_pnl >= position.profit_target ? (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => handleClosePosition(position.id, position.unrealized_pnl, position.profit_target, position.symbol)}
+                            disabled={isThisClosing}
+                            className="gap-1 bg-primary hover:bg-primary/90"
+                          >
+                            {isThisClosing ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <TrendingUp className="h-4 w-4" />
+                            )}
+                            Take Profit
+                          </Button>
+                        ) : (
+                          <Badge variant="outline" className="text-xs text-muted-foreground">
+                            Waiting for target...
+                          </Badge>
+                        )}
                       </div>
                     </div>
 
@@ -268,44 +282,6 @@ export function PositionsPanel() {
           )}
         </CardContent>
       </Card>
-
-      {/* Loss Confirmation Dialog */}
-      <AlertDialog open={!!lossConfirmPosition} onOpenChange={() => setLossConfirmPosition(null)}>
-        <AlertDialogContent className="bg-card border-border">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" />
-              Close at Loss?
-            </AlertDialogTitle>
-            <AlertDialogDescription className="space-y-2">
-              <p>
-                <span className="font-medium text-foreground">{lossConfirmPosition?.symbol}</span> is currently at a loss of{' '}
-                <span className="font-medium text-destructive">${Math.abs(lossConfirmPosition?.pnl || 0).toFixed(2)}</span>.
-              </p>
-              <p className="text-sm">
-                The bot is designed to only close positions at the profit target. 
-                Closing now will realize this loss.
-              </p>
-              <p className="font-medium text-foreground mt-3">
-                Are you sure you want to close this position at a loss?
-              </p>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isClosing}>Wait for Profit</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => lossConfirmPosition && executeClose(lossConfirmPosition.id)}
-              disabled={isClosing}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {isClosing ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : null}
-              Close at Loss
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }

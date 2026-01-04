@@ -16,6 +16,7 @@ import { SignalDebugPanel } from '@/components/dashboard/cards/SignalDebugPanel'
 import { TradeVelocityChart } from '@/components/dashboard/cards/TradeVelocityChart';
 import { TradeExecutionLogPanel } from '@/components/dashboard/cards/TradeExecutionLogPanel';
 import { TradePerformancePanel } from '@/components/dashboard/cards/TradePerformancePanel';
+import { PairPerformanceLeaderboard } from '@/components/dashboard/cards/PairPerformanceLeaderboard';
 
 export default function DashboardPage() {
   return (
@@ -36,8 +37,11 @@ export default function DashboardPage() {
 
       <StatsCards />
       
-      {/* Historical Trade Performance - Full Width */}
-      <TradePerformancePanel />
+      {/* Historical Trade Performance + Pair Leaderboard */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <TradePerformancePanel />
+        <PairPerformanceLeaderboard />
+      </div>
       
       {/* Debug & Execution Panels - Full Width */}
       <SignalDebugPanel />
