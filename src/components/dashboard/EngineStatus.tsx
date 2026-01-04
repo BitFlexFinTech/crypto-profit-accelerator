@@ -1,12 +1,12 @@
-import { useTradingEngine } from '@/hooks/useTradingEngine';
+import { useTrading } from '@/contexts/TradingContext';
 import { Badge } from '@/components/ui/badge';
 import { Activity, Brain, Loader2, AlertCircle } from 'lucide-react';
 
 export function EngineStatus() {
-  const { engineState } = useTradingEngine();
+  const { engineStatus, isEngineRunning } = useTrading();
 
   const getStatusConfig = () => {
-    switch (engineState.status) {
+    switch (engineStatus) {
       case 'analyzing':
         return {
           icon: <Brain className="h-3 w-3 animate-pulse" />,
@@ -34,7 +34,7 @@ export function EngineStatus() {
       default:
         return {
           icon: null,
-          text: 'Idle',
+          text: isEngineRunning ? 'Starting...' : 'Idle',
           className: 'bg-secondary text-muted-foreground',
         };
     }

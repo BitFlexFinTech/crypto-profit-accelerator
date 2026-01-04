@@ -1,33 +1,23 @@
-import { useTradingEngine } from '@/hooks/useTradingEngine';
+import { useTrading } from '@/contexts/TradingContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TrendingUp, TrendingDown, Zap, RefreshCw, Clock } from 'lucide-react';
-
-interface TradingSignal {
-  exchange: string;
-  symbol: string;
-  direction: 'long' | 'short';
-  score: number;
-  confidence: number;
-  volatility: 'low' | 'medium' | 'high';
-  momentum: 'bearish' | 'neutral' | 'bullish';
-  estimatedTimeToProfit: string;
-  entryPrice: number;
-  targetPrice: number;
-  reasoning: string;
-  tradeType: 'spot' | 'futures';
-}
+import { toast } from 'sonner';
 
 export function LiveSignals() {
-  const { engineState, forceAnalyze } = useTradingEngine();
+  const { signals, engineStatus, forceAnalyze } = useTrading();
   
-  const signals = engineState.currentSignals as TradingSignal[];
-  const isAnalyzing = engineState.status === 'analyzing';
+  const isAnalyzing = engineStatus === 'analyzing';
 
   const handleRefresh = async () => {
-    await forceAnalyze();
+    try {
+      await forceAnalyze();
+      toast.success('Analysis Complete', { dismissible: true });
+    } catch {
+      toast.error('Analysis failed', { dismissible: true });
+    }
   };
 
   const getScoreColor = (score: number) => {
@@ -53,11 +43,6 @@ export function LiveSignals() {
             <Zap className="h-5 w-5 text-primary" />
             Live Trading Signals
           </CardTitle>
-          {engineState.lastAnalysis && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Last updated: {engineState.lastAnalysis.toLocaleTimeString()}
-            </p>
-          )}
         </div>
         <Button 
           variant="outline" 
@@ -87,7 +72,8 @@ export function LiveSignals() {
             {signals.slice(0, 5).map((signal, index) => (
               <div 
                 key={`${signal.symbol}-${index}`}
-                className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border"
+                className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border animate-fade-in"
+                style={{ animationDelay: `${index * 100}ms` }}
               >
                 <div className="flex items-center gap-3">
                   <div className="flex flex-col items-center">
@@ -137,12 +123,6 @@ export function LiveSignals() {
                 </div>
               </div>
             ))}
-          </div>
-        )}
-
-        {engineState.lastError && (
-          <div className="mt-3 p-3 rounded-lg bg-destructive/10 border border-destructive/20">
-            <p className="text-sm text-destructive">{engineState.lastError}</p>
           </div>
         )}
       </CardContent>

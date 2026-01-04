@@ -1,15 +1,14 @@
-import { usePositions } from '@/hooks/usePositions';
-import { useExchanges } from '@/hooks/useExchanges';
+import { useTrading } from '@/contexts/TradingContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { X, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
 import { EXCHANGE_CONFIGS } from '@/types/trading';
+import { toast } from 'sonner';
 
 export function PositionsPanel() {
-  const { positions, loading, closePosition, closeAllPositions, getTotalUnrealizedPnl } = usePositions();
-  const { exchanges } = useExchanges();
+  const { positions, loading, closePosition, closeAllPositions, exchanges } = useTrading();
 
   const getExchangeName = (exchangeId?: string) => {
     if (!exchangeId) return 'Unknown';
@@ -27,7 +26,25 @@ export function PositionsPanel() {
     return config?.logo || '❓';
   };
 
-  const totalPnl = getTotalUnrealizedPnl();
+  const totalPnl = positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+
+  const handleClosePosition = async (positionId: string) => {
+    try {
+      await closePosition(positionId);
+      toast.success('Position Closed', { dismissible: true });
+    } catch {
+      toast.error('Failed to close position', { dismissible: true });
+    }
+  };
+
+  const handleCloseAll = async () => {
+    try {
+      await closeAllPositions();
+      toast.success('All Positions Closed', { dismissible: true });
+    } catch {
+      toast.error('Failed to close positions', { dismissible: true });
+    }
+  };
 
   if (loading) {
     return (
@@ -59,7 +76,7 @@ export function PositionsPanel() {
           <Button 
             variant="destructive" 
             size="sm"
-            onClick={closeAllPositions}
+            onClick={handleCloseAll}
             className="gap-1"
           >
             <AlertTriangle className="h-3 w-3" />
@@ -103,15 +120,12 @@ export function PositionsPanel() {
                         <Badge variant="outline" className="text-xs">
                           {position.trade_type}
                         </Badge>
-                        {position.is_paper_trade && (
-                          <Badge variant="secondary" className="text-xs">Paper</Badge>
-                        )}
                       </div>
                       <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
                         <span>{getExchangeName(position.exchange_id)}</span>
                         <span>Entry: ${position.entry_price.toFixed(4)}</span>
                         <span>Size: ${position.order_size_usd.toFixed(2)}</span>
-                        {position.leverage > 1 && <span>{position.leverage}x</span>}
+                        {position.leverage && position.leverage > 1 && <span>{position.leverage}x</span>}
                       </div>
                     </div>
                   </div>
@@ -128,7 +142,7 @@ export function PositionsPanel() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => closePosition(position.id)}
+                      onClick={() => handleClosePosition(position.id)}
                       className="h-8 w-8 text-muted-foreground hover:text-destructive"
                     >
                       <X className="h-4 w-4" />

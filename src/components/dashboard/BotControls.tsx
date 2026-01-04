@@ -1,51 +1,74 @@
-import { useBotSettings } from '@/hooks/useBotSettings';
+import { useTrading } from '@/contexts/TradingContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Play, Pause, AlertTriangle } from 'lucide-react';
-import { usePositions } from '@/hooks/usePositions';
+import { Play, Square, AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 
 export function BotControls() {
-  const { settings, toggleBotRunning, togglePaperTrading } = useBotSettings();
-  const { closeAllPositions, positions } = usePositions();
+  const { settings, isEngineRunning, startBot, stopBot, closeAllPositions, positions } = useTrading();
 
   if (!settings) return null;
 
-  const handleKillSwitch = async () => {
-    if (settings.is_bot_running) {
-      await toggleBotRunning();
+  const handleStart = async () => {
+    try {
+      await startBot();
+      toast.success('Bot Started', {
+        description: 'Trading engine is now active',
+        dismissible: true,
+      });
+    } catch (error) {
+      toast.error('Failed to start bot', { dismissible: true });
     }
-    if (positions.length > 0) {
-      await closeAllPositions();
+  };
+
+  const handleStop = async () => {
+    try {
+      await stopBot();
+      toast.success('Bot Stopped', {
+        description: 'Trading engine has been paused',
+        dismissible: true,
+      });
+    } catch (error) {
+      toast.error('Failed to stop bot', { dismissible: true });
+    }
+  };
+
+  const handleKillSwitch = async () => {
+    try {
+      if (isEngineRunning) {
+        await stopBot();
+      }
+      if (positions.length > 0) {
+        await closeAllPositions();
+      }
+      toast.success('Kill Switch Activated', {
+        description: 'Bot stopped and all positions closed',
+        dismissible: true,
+      });
+    } catch (error) {
+      toast.error('Kill switch error', { dismissible: true });
     }
   };
 
   return (
     <div className="flex items-center gap-3">
       <Badge 
-        variant={settings.is_paper_trading ? 'secondary' : 'default'}
-        className={`cursor-pointer ${!settings.is_paper_trading ? 'bg-primary text-primary-foreground' : ''}`}
-        onClick={togglePaperTrading}
+        variant={isEngineRunning ? 'default' : 'secondary'}
+        className={isEngineRunning ? 'bg-primary text-primary-foreground animate-pulse' : ''}
       >
-        {settings.is_paper_trading ? '📝 Paper' : '💰 Live'}
-      </Badge>
-
-      <Badge 
-        variant={settings.is_bot_running ? 'default' : 'secondary'}
-        className={settings.is_bot_running ? 'bg-primary text-primary-foreground animate-pulse-slow' : ''}
-      >
-        {settings.is_bot_running ? '🟢 Running' : '⚪ Stopped'}
+        {isEngineRunning ? '🟢 Running' : '⚪ Stopped'}
       </Badge>
 
       <Button
-        variant={settings.is_bot_running ? 'outline' : 'default'}
+        variant={isEngineRunning ? 'outline' : 'default'}
         size="sm"
-        onClick={toggleBotRunning}
+        onClick={isEngineRunning ? handleStop : handleStart}
         className="gap-2"
       >
-        {settings.is_bot_running ? (
+        {isEngineRunning ? (
           <>
-            <Pause className="h-4 w-4" />
-            Pause Bot
+            <Square className="h-4 w-4" />
+            Stop Bot
           </>
         ) : (
           <>

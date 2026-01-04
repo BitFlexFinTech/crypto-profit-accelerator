@@ -1,10 +1,15 @@
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsPanel } from '@/components/dashboard/PositionsPanel';
-import { PnLCharts } from '@/components/dashboard/PnLCharts';
 import { BotControls } from '@/components/dashboard/BotControls';
 import { LiveSignals } from '@/components/dashboard/LiveSignals';
 import { ConnectionStatus } from '@/components/dashboard/ConnectionStatus';
 import { EngineStatus } from '@/components/dashboard/EngineStatus';
+import { MarketScanner } from '@/components/dashboard/cards/MarketScanner';
+import { TradeFlow } from '@/components/dashboard/cards/TradeFlow';
+import { ExecutionSpeed } from '@/components/dashboard/cards/ExecutionSpeed';
+import { VolatilityScanner } from '@/components/dashboard/cards/VolatilityScanner';
+import { TradeTiming } from '@/components/dashboard/cards/TradeTiming';
+import { LoopMonitor } from '@/components/dashboard/cards/LoopMonitor';
 
 export default function DashboardPage() {
   return (
@@ -22,12 +27,20 @@ export default function DashboardPage() {
 
       <StatsCards />
       
+      {/* Real-time Cards Grid */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <MarketScanner />
+        <TradeFlow />
+        <ExecutionSpeed />
+        <VolatilityScanner />
+        <TradeTiming />
+        <LoopMonitor />
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <PositionsPanel />
         <LiveSignals />
       </div>
-
-      <PnLCharts />
     </div>
   );
 }
