@@ -31,16 +31,88 @@ interface MarketData {
   low24h: number;
 }
 
-// Fetch market data from exchange public APIs
+interface HistoricalPerformance {
+  symbol: string;
+  avgProfit: number;
+  avgDurationSec: number;
+  winRate: number;
+  tradeCount: number;
+}
+
+// TOP 10 high-liquidity pairs by market cap - PRIORITIZE THESE for fastest trades
+const TOP_10_PAIRS = [
+  'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT',
+  'BNB/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 'DOT/USDT'
+];
+
+// Fetch historical performance from trades table
+async function fetchHistoricalPerformance(supabaseClient: any): Promise<Record<string, HistoricalPerformance>> {
+  try {
+    const { data: trades, error } = await supabaseClient
+      .from('trades')
+      .select('symbol, net_profit, opened_at, closed_at, status')
+      .eq('status', 'closed')
+      .order('closed_at', { ascending: false })
+      .limit(500);
+
+    if (error || !trades) {
+      console.log("No historical trades found or error:", error);
+      return {};
+    }
+
+    const performanceMap: Record<string, { profits: number[]; durations: number[]; wins: number; total: number }> = {};
+
+    trades.forEach((trade: any) => {
+      if (!trade.symbol || !trade.opened_at || !trade.closed_at) return;
+      
+      if (!performanceMap[trade.symbol]) {
+        performanceMap[trade.symbol] = { profits: [], durations: [], wins: 0, total: 0 };
+      }
+
+      const duration = (new Date(trade.closed_at).getTime() - new Date(trade.opened_at).getTime()) / 1000;
+      const profit = Number(trade.net_profit) || 0;
+
+      performanceMap[trade.symbol].profits.push(profit);
+      performanceMap[trade.symbol].durations.push(duration);
+      performanceMap[trade.symbol].total++;
+      if (profit > 0) performanceMap[trade.symbol].wins++;
+    });
+
+    const result: Record<string, HistoricalPerformance> = {};
+    for (const [symbol, data] of Object.entries(performanceMap)) {
+      const avgProfit = data.profits.reduce((a, b) => a + b, 0) / data.profits.length;
+      const avgDuration = data.durations.reduce((a, b) => a + b, 0) / data.durations.length;
+      result[symbol] = {
+        symbol,
+        avgProfit,
+        avgDurationSec: avgDuration,
+        winRate: data.total > 0 ? data.wins / data.total : 0,
+        tradeCount: data.total,
+      };
+    }
+
+    return result;
+  } catch (e) {
+    console.error("Error fetching historical performance:", e);
+    return {};
+  }
+}
+
+// Fetch market data from exchange public APIs - FILTER TO TOP 10 ONLY
 async function fetchBinanceData(): Promise<MarketData[]> {
   try {
     const response = await fetch("https://api.binance.com/api/v3/ticker/24hr");
     if (!response.ok) throw new Error("Binance API error");
     const data = await response.json();
     
+    // Convert TOP_10_PAIRS to Binance format for filtering
+    const top10Binance = TOP_10_PAIRS.map(s => s.replace('/USDT', 'USDT'));
+    
     return data
-      .filter((t: any) => t.symbol.endsWith("USDT") && parseFloat(t.quoteVolume) > 1000000)
-      .slice(0, 20)
+      .filter((t: any) => {
+        // STRICT: Only TOP 10 pairs with high volume
+        return top10Binance.includes(t.symbol) && parseFloat(t.quoteVolume) > 10000000;
+      })
       .map((t: any) => ({
         symbol: t.symbol.replace("USDT", "/USDT"),
         price: parseFloat(t.lastPrice),
@@ -62,9 +134,14 @@ async function fetchOKXData(): Promise<MarketData[]> {
     if (!response.ok) throw new Error("OKX API error");
     const data = await response.json();
     
+    // Convert TOP_10_PAIRS to OKX format
+    const top10OKX = TOP_10_PAIRS.map(s => s.replace('/', '-'));
+    
     return data.data
-      .filter((t: any) => t.instId.endsWith("-USDT") && parseFloat(t.volCcy24h) > 1000000)
-      .slice(0, 20)
+      .filter((t: any) => {
+        // STRICT: Only TOP 10 pairs with high volume
+        return top10OKX.includes(t.instId) && parseFloat(t.volCcy24h) > 10000000;
+      })
       .map((t: any) => ({
         symbol: t.instId.replace("-", "/"),
         price: parseFloat(t.last),
@@ -86,9 +163,14 @@ async function fetchBybitData(): Promise<MarketData[]> {
     if (!response.ok) throw new Error("Bybit API error");
     const data = await response.json();
     
+    // Convert TOP_10_PAIRS to Bybit format
+    const top10Bybit = TOP_10_PAIRS.map(s => s.replace('/USDT', 'USDT'));
+    
     return data.result.list
-      .filter((t: any) => t.symbol.endsWith("USDT") && parseFloat(t.turnover24h) > 1000000)
-      .slice(0, 20)
+      .filter((t: any) => {
+        // STRICT: Only TOP 10 pairs with high volume
+        return top10Bybit.includes(t.symbol) && parseFloat(t.turnover24h) > 10000000;
+      })
       .map((t: any) => ({
         symbol: t.symbol.replace("USDT", "/USDT"),
         price: parseFloat(t.lastPrice),
@@ -110,9 +192,14 @@ async function fetchKucoinData(): Promise<MarketData[]> {
     if (!response.ok) throw new Error("KuCoin API error");
     const data = await response.json();
     
+    // Convert TOP_10_PAIRS to KuCoin format
+    const top10Kucoin = TOP_10_PAIRS.map(s => s.replace('/', '-'));
+    
     return data.data.ticker
-      .filter((t: any) => t.symbol.endsWith("-USDT") && parseFloat(t.volValue) > 1000000)
-      .slice(0, 20)
+      .filter((t: any) => {
+        // STRICT: Only TOP 10 pairs with high volume
+        return top10Kucoin.includes(t.symbol) && parseFloat(t.volValue) > 10000000;
+      })
       .map((t: any) => ({
         symbol: t.symbol.replace("-", "/"),
         price: parseFloat(t.last),
@@ -143,7 +230,12 @@ function calculateMomentum(change1h: number, change24h: number): "bearish" | "ne
   return "neutral";
 }
 
-function calculateScore(data: MarketData, aggressiveness: string): number {
+// Calculate score with historical performance boost for fast trades
+function calculateScore(
+  data: MarketData, 
+  aggressiveness: string, 
+  historicalPerf?: HistoricalPerformance
+): number {
   const volatilityScore = calculateVolatility(data.high24h, data.low24h, data.price) === "high" ? 30 : 
                           calculateVolatility(data.high24h, data.low24h, data.price) === "medium" ? 20 : 10;
   
@@ -151,6 +243,27 @@ function calculateScore(data: MarketData, aggressiveness: string): number {
   const volumeScore = Math.min(data.volume24h / 10000000, 30);
   
   let baseScore = volatilityScore + momentumScore + volumeScore;
+  
+  // HISTORICAL PERFORMANCE BOOST: Favor pairs that close fast and profitably
+  if (historicalPerf && historicalPerf.tradeCount >= 3) {
+    // Speed bonus: pairs that close under 5 minutes get boost
+    if (historicalPerf.avgDurationSec < 300) {
+      baseScore += 20; // Fast closer bonus
+    } else if (historicalPerf.avgDurationSec < 600) {
+      baseScore += 10; // Medium speed bonus
+    } else if (historicalPerf.avgDurationSec > 1200) {
+      baseScore -= 15; // Penalty for slow closers
+    }
+    
+    // Win rate bonus
+    if (historicalPerf.winRate >= 0.7) {
+      baseScore += 15;
+    } else if (historicalPerf.winRate >= 0.5) {
+      baseScore += 5;
+    } else if (historicalPerf.winRate < 0.3) {
+      baseScore -= 20; // Heavy penalty for low win rate
+    }
+  }
   
   // Adjust based on aggressiveness
   if (aggressiveness === "aggressive") {
@@ -170,7 +283,15 @@ serve(async (req) => {
   try {
     const { exchanges, mode, aggressiveness } = await req.json();
     
-    console.log("Analyzing pairs for exchanges:", exchanges, "mode:", mode, "aggressiveness:", aggressiveness);
+    console.log("Analyzing TOP 10 pairs for exchanges:", exchanges, "mode:", mode, "aggressiveness:", aggressiveness);
+
+    // Initialize Supabase client for historical performance lookup
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseClient = createClient(supabaseUrl, supabaseKey);
+
+    // Fetch historical performance data in parallel with market data
+    const historicalPerfPromise = fetchHistoricalPerformance(supabaseClient);
 
     // Fetch market data from enabled exchanges
     const allMarketData: { exchange: string; data: MarketData[] }[] = [];
@@ -206,24 +327,34 @@ serve(async (req) => {
       );
     }
     
+    // Wait for both market data and historical performance
     await Promise.all(fetchPromises);
+    const historicalPerf = await historicalPerfPromise;
     
     console.log("Fetched market data from", allMarketData.length, "exchanges");
+    console.log("Historical performance data for", Object.keys(historicalPerf).length, "symbols");
 
-    // Prepare data for AI analysis
+    // Prepare data for AI analysis with historical performance scoring
     const marketSummary = allMarketData.flatMap(({ exchange, data }) =>
-      data.slice(0, 10).map(d => ({
-        exchange,
-        ...d,
-        volatility: calculateVolatility(d.high24h, d.low24h, d.price),
-        momentum: calculateMomentum(d.priceChange1h, d.priceChange24h),
-        score: calculateScore(d, aggressiveness),
-      }))
+      data.map(d => {
+        const perf = historicalPerf[d.symbol];
+        return {
+          exchange,
+          ...d,
+          volatility: calculateVolatility(d.high24h, d.low24h, d.price),
+          momentum: calculateMomentum(d.priceChange1h, d.priceChange24h),
+          score: calculateScore(d, aggressiveness, perf),
+          // Include historical metrics for AI context
+          historicalWinRate: perf?.winRate,
+          historicalAvgDuration: perf?.avgDurationSec,
+          historicalTradeCount: perf?.tradeCount,
+        };
+      })
     );
 
-    // Sort by score and get top candidates
+    // Sort by score and get top candidates (prioritizing fast closers)
     marketSummary.sort((a, b) => b.score - a.score);
-    const topCandidates = marketSummary.slice(0, 15);
+    const topCandidates = marketSummary.slice(0, 10); // TOP 10 only
 
     // Use Lovable AI for intelligent analysis
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
@@ -231,30 +362,46 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    const aiPrompt = `You are an expert HFT crypto trading analyst. Analyze these top trading candidates and provide specific trading signals.
+    const aiPrompt = `You are an expert HIGH-FREQUENCY crypto trading analyst. Your ONLY goal is to select pairs that will hit profit targets in the SHORTEST time possible (ideally under 5 minutes).
 
-Market Data (sorted by opportunity score):
+CRITICAL REQUIREMENTS:
+- ONLY select from TOP 10 high-liquidity pairs (BTC, ETH, SOL, XRP, DOGE, BNB, ADA, AVAX, LINK, DOT)
+- Pairs with faster historical close times should be PRIORITIZED
+- Pairs with low win rates (<30%) should be AVOIDED
+- Target: UNDER 5 MINUTES to hit $1 (spot) or $3 (futures) profit
+
+Market Data (sorted by opportunity score, includes historical performance):
 ${JSON.stringify(topCandidates, null, 2)}
 
+Historical Performance Key:
+- historicalWinRate: Past win rate (higher = better)
+- historicalAvgDuration: Average seconds to close (LOWER = BETTER, prioritize under 300s)
+- historicalTradeCount: Number of past trades (more data = more reliable)
+
 Trading Parameters:
-- Mode: ${mode} (spot targets $1 profit, futures targets $3 profit)
+- Mode: ${mode} (spot = $1 profit target, futures = $3 profit target STRICTLY)
 - Aggressiveness: ${aggressiveness}
 - Order size: $333-$450 per trade
+- STRICT RULE: Futures trades MUST target $3 profit after all fees
 
-For each of the top 5 opportunities, provide:
-1. Direction (long/short) based on momentum
-2. Confidence level (0-1)
-3. Estimated time to reach profit target
-4. Brief reasoning (1-2 sentences)
+For the top 5 FASTEST opportunities, provide:
+1. Direction (long/short) based on momentum and trend
+2. Confidence level (0-1) - higher for pairs with good historical performance
+3. Estimated time to reach profit target (be aggressive, aim for <5 min)
+4. Brief reasoning focusing on WHY this pair will hit target quickly
 
-Respond ONLY with a JSON array of signals in this exact format:
+AVOID pairs with:
+- historicalWinRate < 0.3
+- historicalAvgDuration > 1200 (20 minutes)
+
+Respond ONLY with a JSON array:
 [
   {
     "symbol": "BTC/USDT",
     "direction": "long",
     "confidence": 0.85,
-    "timeToProfit": "2-5 min",
-    "reasoning": "Strong bullish momentum with high volume support."
+    "timeToProfit": "2-3 min",
+    "reasoning": "High volatility, strong momentum, historical avg close time 180s"
   }
 ]`;
 

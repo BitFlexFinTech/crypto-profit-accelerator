@@ -66,14 +66,32 @@ export function TradingConfig() {
             </div>
 
             <div className="space-y-2">
-              <Label>Futures Profit Target (USD)</Label>
+              <div className="flex items-center gap-2">
+                <Label>Futures Profit Target (USD)</Label>
+                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-primary/20 text-primary border border-primary/30">
+                  Default: $3
+                </span>
+              </div>
               <Input
                 type="number"
                 step="0.01"
+                min="3"
                 value={settings.futures_profit_target}
-                onChange={(e) => updateSettings({ futures_profit_target: Number(e.target.value) })}
+                onChange={(e) => {
+                  const value = Number(e.target.value);
+                  // Enforce minimum $3 for futures
+                  updateSettings({ futures_profit_target: Math.max(3, value) });
+                }}
                 className="bg-secondary border-border"
               />
+              {settings.futures_profit_target < 3 && (
+                <p className="text-xs text-destructive">
+                  ⚠️ Minimum $3 required for futures trades (after all fees)
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Strict rule: Bot closes leverage trades at $3 net profit (after all fees)
+              </p>
             </div>
           </CardContent>
         </Card>
