@@ -1,18 +1,33 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { useTrading } from '@/contexts/TradingContext';
-import { Activity, CheckCircle2, XCircle, Clock, Zap } from 'lucide-react';
+import { Activity, CheckCircle2, XCircle, Clock, Zap, FlaskConical } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+
+// Match thresholds from TradingContext
+const THRESHOLDS = {
+  aggressive: { confidence: 0.25, score: 25 },
+  balanced: { confidence: 0.35, score: 35 },
+  conservative: { confidence: 0.50, score: 45 },
+};
 
 export function SignalDebugPanel() {
-  const { signals, settings, positions, exchanges, engineStatus, engineMetrics, isEngineRunning } = useTrading();
+  const { 
+    signals, 
+    settings, 
+    positions, 
+    exchanges, 
+    engineStatus, 
+    engineMetrics, 
+    isEngineRunning,
+    testTradeTopSignal,
+  } = useTrading();
 
-  // Calculate thresholds based on aggressiveness
-  const confidenceThreshold = settings?.ai_aggressiveness === 'aggressive' ? 0.4 :
-                              settings?.ai_aggressiveness === 'conservative' ? 0.7 : 0.5;
-  
-  const scoreThreshold = settings?.ai_aggressiveness === 'aggressive' ? 40 :
-                         settings?.ai_aggressiveness === 'conservative' ? 60 : 45;
+  // Get thresholds based on aggressiveness
+  const thresholdKey = (settings?.ai_aggressiveness || 'balanced') as keyof typeof THRESHOLDS;
+  const { confidence: confidenceThreshold, score: scoreThreshold } = THRESHOLDS[thresholdKey] || THRESHOLDS.balanced;
 
   const maxPositions = settings?.max_open_positions || 10;
   const currentPositions = positions.length;
@@ -37,15 +52,46 @@ export function SignalDebugPanel() {
     ? Math.floor((Date.now() - engineMetrics.lastScanTime.getTime()) / 1000)
     : null;
 
+  const handleTestTrade = async () => {
+    if (signals.length === 0) {
+      toast.error('No signals available to test');
+      return;
+    }
+    if (connectedExchanges.length === 0) {
+      toast.error('No exchanges connected');
+      return;
+    }
+    
+    toast.info(`Testing trade on ${signals[0].symbol}...`);
+    try {
+      await testTradeTopSignal();
+      toast.success('Test trade executed - check logs for details');
+    } catch (err) {
+      toast.error(`Test trade failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  };
+
+  const canTestTrade = signals.length > 0 && connectedExchanges.length > 0;
+
   return (
     <Card className="col-span-full">
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <CardTitle className="flex items-center gap-2 text-base">
             <Activity className="h-4 w-4 text-primary" />
             Signal Debug Panel
           </CardTitle>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTestTrade}
+              disabled={!canTestTrade}
+              className="h-7 gap-1 text-xs"
+            >
+              <FlaskConical className="h-3 w-3" />
+              Test Trade
+            </Button>
             <Badge variant={isEngineRunning ? 'default' : 'secondary'} className="text-xs">
               {isEngineRunning ? '🟢 LIVE' : '⚪ STOPPED'}
             </Badge>
@@ -182,11 +228,12 @@ export function SignalDebugPanel() {
         </div>
 
         {/* Engine Metrics */}
-        <div className="flex items-center gap-4 text-xs text-muted-foreground pt-2 border-t">
+        <div className="flex items-center gap-4 text-xs text-muted-foreground pt-2 border-t flex-wrap">
           <span>Cycle: {engineMetrics.cycleTime}ms</span>
           <span>Analysis: {engineMetrics.analysisTime}ms</span>
           <span>Execution: {engineMetrics.executionTime}ms</span>
           <span>Status: {engineStatus}</span>
+          <span>Exchanges: {connectedExchanges.length} connected</span>
         </div>
       </CardContent>
     </Card>
