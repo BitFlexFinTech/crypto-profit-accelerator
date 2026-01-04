@@ -538,11 +538,11 @@ function determineDirectionFromTechnicals(
     else if (technicals.bbSignal === "sell") shortSignals += 1;
   }
   
-  // When signals are equal, randomly choose direction to balance long/short distribution
-  if (longSignals === shortSignals) {
-    return Math.random() > 0.5 ? "long" : "short";
-  }
-  return longSignals > shortSignals ? "long" : "short";
+  // FORCE 50/50 BALANCE: Random selection regardless of technical signals
+  // This ensures balanced long/short distribution in all market conditions
+  // Technical indicators are still calculated for scoring, but direction is randomized
+  console.log(`[Direction] Long signals: ${longSignals}, Short signals: ${shortSignals}, using random 50/50`);
+  return Math.random() > 0.5 ? "long" : "short";
 }
 
 // ========== MAIN HANDLER ==========
