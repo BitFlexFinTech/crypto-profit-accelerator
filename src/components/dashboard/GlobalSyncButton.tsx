@@ -1,15 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useTrading } from '@/contexts/TradingContext';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, Settings, Clock } from 'lucide-react';
+import { RefreshCw, Settings, Wifi, WifiOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
-import { formatDistanceToNow } from 'date-fns';
+import { wsManager } from '@/services/ExchangeWebSocketManager';
 
 export function GlobalSyncButton() {
-  const { syncBalances, exchanges } = useTrading();
+  const { syncBalances, exchanges, engineMetrics } = useTrading();
   const [syncing, setSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [secondsAgo, setSecondsAgo] = useState(0);
+  const [isLive, setIsLive] = useState(false);
   const navigate = useNavigate();
 
   // Memoize connected exchanges to prevent infinite re-renders
@@ -19,19 +20,19 @@ export function GlobalSyncButton() {
   );
   const hasExchanges = connectedExchanges.length > 0;
 
-  // Get the most recent sync time from exchanges
+  // Update "seconds ago" based on engineMetrics.lastScanTime for real-time display
   useEffect(() => {
-    if (connectedExchanges.length > 0) {
-      const syncTimes = connectedExchanges
-        .map(e => e.last_balance_sync ? new Date(e.last_balance_sync) : null)
-        .filter((d): d is Date => d !== null);
-      
-      if (syncTimes.length > 0) {
-        const mostRecent = new Date(Math.max(...syncTimes.map(d => d.getTime())));
-        setLastSync(mostRecent);
+    const interval = setInterval(() => {
+      if (engineMetrics.lastScanTime) {
+        const elapsed = Math.floor((Date.now() - engineMetrics.lastScanTime.getTime()) / 1000);
+        setSecondsAgo(elapsed);
       }
-    }
-  }, [connectedExchanges]);
+      
+      // Check if WebSocket is connected
+      setIsLive(wsManager.isAnyConnected());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [engineMetrics.lastScanTime]);
 
   const handleSync = async () => {
     if (!hasExchanges) {
@@ -44,7 +45,6 @@ export function GlobalSyncButton() {
     setSyncing(true);
     try {
       await syncBalances();
-      setLastSync(new Date());
       toast.success('Balances synced', {
         description: `Synced ${connectedExchanges.length} exchange(s)`,
       });
@@ -71,14 +71,29 @@ export function GlobalSyncButton() {
     );
   }
 
+  const getSyncStatus = () => {
+    if (isLive || secondsAgo < 3) {
+      return { text: 'Live', icon: Wifi, className: 'text-primary' };
+    }
+    if (secondsAgo < 10) {
+      return { text: `${secondsAgo}s ago`, icon: Wifi, className: 'text-primary' };
+    }
+    if (secondsAgo < 60) {
+      return { text: `${secondsAgo}s ago`, icon: Wifi, className: 'text-yellow-500' };
+    }
+    const mins = Math.floor(secondsAgo / 60);
+    return { text: `${mins}m ago`, icon: WifiOff, className: 'text-muted-foreground' };
+  };
+
+  const syncStatus = getSyncStatus();
+  const StatusIcon = syncStatus.icon;
+
   return (
     <div className="flex items-center gap-3">
-      {lastSync && (
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Clock className="h-3 w-3" />
-          <span>Synced {formatDistanceToNow(lastSync, { addSuffix: true })}</span>
-        </div>
-      )}
+      <div className={`flex items-center gap-1 text-xs ${syncStatus.className}`}>
+        <StatusIcon className="h-3 w-3" />
+        <span>{syncStatus.text}</span>
+      </div>
       <Button
         variant="outline"
         size="sm"
@@ -87,7 +102,7 @@ export function GlobalSyncButton() {
         className="gap-2"
       >
         <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-        {syncing ? 'Syncing...' : 'Sync Data'}
+        {syncing ? 'Syncing...' : 'Sync'}
       </Button>
     </div>
   );

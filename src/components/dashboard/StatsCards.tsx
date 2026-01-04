@@ -5,29 +5,32 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { DollarSign, TrendingUp, TrendingDown, Target, Percent, Activity, Wallet, Lock } from 'lucide-react';
 
 export function StatsCards() {
-  const { balances, trades, positions, loading } = useTrading();
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const { balances, trades, positions, loading, engineMetrics } = useTrading();
   const [secondsAgo, setSecondsAgo] = useState(0);
 
-  // Update the "seconds ago" counter every second
+  // Update the "seconds ago" counter based on engineMetrics.lastScanTime
   useEffect(() => {
     const interval = setInterval(() => {
-      setSecondsAgo(Math.floor((Date.now() - lastUpdate.getTime()) / 1000));
+      if (engineMetrics.lastScanTime) {
+        const elapsed = Math.floor((Date.now() - engineMetrics.lastScanTime.getTime()) / 1000);
+        setSecondsAgo(elapsed);
+      }
     }, 1000);
     return () => clearInterval(interval);
-  }, [lastUpdate]);
+  }, [engineMetrics.lastScanTime]);
 
-  // Track when balances update
+  // Reset counter when lastScanTime updates
   useEffect(() => {
-    if (balances.length > 0) {
-      setLastUpdate(new Date());
+    if (engineMetrics.lastScanTime) {
       setSecondsAgo(0);
     }
-  }, [balances]);
+  }, [engineMetrics.lastScanTime]);
 
   const totalBalance = balances.reduce((sum, b) => sum + (b.total || 0), 0);
   const availableBalance = balances.reduce((sum, b) => sum + (b.available || 0), 0);
-  const lockedBalance = balances.reduce((sum, b) => sum + (b.locked || 0), 0);
+  
+  // FIX: Calculate locked balance from open positions' order_size_usd (not from balances.locked which is always $0 for paper trades)
+  const lockedBalance = positions.reduce((sum, p) => sum + (p.order_size_usd || 0), 0);
   
   // Calculate stats from trades
   const todayStart = new Date();
