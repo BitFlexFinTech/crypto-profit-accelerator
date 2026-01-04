@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTrading } from '@/contexts/TradingContext';
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip } from 'recharts';
+import { BarChart, Bar, XAxis, ResponsiveContainer, Cell } from 'recharts';
 import { TrendingUp } from 'lucide-react';
 import { useMemo } from 'react';
 
@@ -11,7 +11,6 @@ export function TradeVelocityChart() {
     const now = new Date();
     const hours: { hour: string; count: number; profitable: number; losing: number }[] = [];
     
-    // Create 24 hour buckets
     for (let i = 23; i >= 0; i--) {
       const hourDate = new Date(now.getTime() - i * 60 * 60 * 1000);
       const hourLabel = hourDate.getHours().toString().padStart(2, '0');
@@ -23,7 +22,6 @@ export function TradeVelocityChart() {
       });
     }
 
-    // Count trades per hour
     trades.forEach(trade => {
       if (!trade.created_at) return;
       
@@ -47,65 +45,42 @@ export function TradeVelocityChart() {
   }, [trades]);
 
   const totalTrades24h = hourlyData.reduce((sum, h) => sum + h.count, 0);
-  const avgPerHour = (totalTrades24h / 24).toFixed(1);
   const currentHourTrades = hourlyData[hourlyData.length - 1]?.count || 0;
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
+    <Card className="h-[200px] overflow-hidden">
+      <CardHeader className="py-2 px-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-base">
+          <CardTitle className="flex items-center gap-2 text-sm">
             <TrendingUp className="h-4 w-4 text-primary" />
             Trade Velocity
           </CardTitle>
-          <div className="text-xs text-muted-foreground">
-            Avg: {avgPerHour}/hr
+          <div className="text-[10px] text-muted-foreground tabular-nums">
+            {(totalTrades24h / 24).toFixed(1)}/hr avg
           </div>
         </div>
       </CardHeader>
-      <CardContent>
-        <div className="flex items-center justify-between mb-3 text-sm">
+      <CardContent className="p-3 pt-0">
+        <div className="flex items-center justify-between mb-2 text-xs">
           <div>
-            <span className="text-2xl font-bold">{totalTrades24h}</span>
+            <span className="text-xl font-bold tabular-nums">{totalTrades24h}</span>
             <span className="text-muted-foreground ml-1">trades (24h)</span>
           </div>
           <div className="text-right">
-            <span className="text-lg font-semibold text-primary">{currentHourTrades}</span>
-            <span className="text-muted-foreground ml-1 text-xs">this hour</span>
+            <span className="text-base font-semibold text-primary tabular-nums">{currentHourTrades}</span>
+            <span className="text-muted-foreground ml-1 text-[10px]">this hour</span>
           </div>
         </div>
         
-        <div className="h-32">
+        <div className="h-20">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={hourlyData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+            <BarChart data={hourlyData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
               <XAxis 
                 dataKey="hour" 
-                tick={{ fontSize: 10 }} 
+                tick={{ fontSize: 8 }} 
                 tickLine={false}
                 axisLine={false}
-                interval={3}
-              />
-              <YAxis 
-                tick={{ fontSize: 10 }} 
-                tickLine={false}
-                axisLine={false}
-                allowDecimals={false}
-              />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (active && payload && payload.length) {
-                    const data = payload[0].payload;
-                    return (
-                      <div className="bg-popover border rounded-lg p-2 text-xs shadow-lg">
-                        <div className="font-semibold">{data.hour}:00</div>
-                        <div>Total: {data.count}</div>
-                        <div className="text-green-500">Profitable: {data.profitable}</div>
-                        <div className="text-red-500">Losing: {data.losing}</div>
-                      </div>
-                    );
-                  }
-                  return null;
-                }}
+                interval={5}
               />
               <Bar dataKey="count" radius={[2, 2, 0, 0]}>
                 {hourlyData.map((entry, index) => (

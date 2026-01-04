@@ -17,7 +17,6 @@ export function LoopMonitor() {
   const [cycleCount, setCycleCount] = useState(0);
 
   useEffect(() => {
-    // Generate loop steps based on engine status
     const newSteps: LoopStep[] = [
       {
         name: 'Fetch Prices',
@@ -25,33 +24,27 @@ export function LoopMonitor() {
         duration: 50,
       },
       {
-        name: 'Analyze Pairs',
+        name: 'Analyze',
         status: engineStatus === 'analyzing' ? 'running' :
                 signals.length > 0 ? 'complete' : 'pending',
         duration: engineMetrics.analysisTime,
       },
       {
-        name: 'Check Positions',
+        name: 'Check Pos',
         status: positions.length > 0 ? 'complete' : 'pending',
         duration: 20,
       },
       {
-        name: 'Execute Trades',
+        name: 'Execute',
         status: engineStatus === 'trading' ? 'running' :
                 engineStatus === 'monitoring' && signals.length > 0 ? 'complete' : 'pending',
         duration: engineMetrics.executionTime,
-      },
-      {
-        name: 'Monitor P&L',
-        status: engineStatus === 'monitoring' ? 'running' : 'pending',
-        duration: 10,
       },
     ];
 
     setSteps(newSteps);
   }, [isEngineRunning, engineStatus, engineMetrics, positions, signals]);
 
-  // Increment cycle count when a full cycle completes
   useEffect(() => {
     if (engineStatus === 'monitoring' && isEngineRunning) {
       setCycleCount(prev => prev + 1);
@@ -60,10 +53,10 @@ export function LoopMonitor() {
 
   const getStatusIcon = (status: LoopStep['status']) => {
     switch (status) {
-      case 'complete': return <CheckCircle className="h-3 w-3 text-primary" />;
-      case 'running': return <Loader2 className="h-3 w-3 text-warning animate-spin" />;
-      case 'error': return <XCircle className="h-3 w-3 text-destructive" />;
-      default: return <Clock className="h-3 w-3 text-muted-foreground" />;
+      case 'complete': return <CheckCircle className="h-2.5 w-2.5 text-primary" />;
+      case 'running': return <Loader2 className="h-2.5 w-2.5 text-warning animate-spin" />;
+      case 'error': return <XCircle className="h-2.5 w-2.5 text-destructive" />;
+      default: return <Clock className="h-2.5 w-2.5 text-muted-foreground" />;
     }
   };
 
@@ -71,29 +64,29 @@ export function LoopMonitor() {
   const progress = (completedSteps / steps.length) * 100;
 
   return (
-    <Card className="bg-card border-border overflow-hidden">
-      <CardHeader className="pb-2">
+    <Card className="h-[200px] overflow-hidden">
+      <CardHeader className="py-2 px-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <RefreshCw className={cn(
               "h-4 w-4 text-primary",
               isEngineRunning && "animate-spin"
             )} />
-            Trading Loop Monitor
+            Loop Monitor
           </CardTitle>
-          <Badge variant="outline" className="text-xs font-mono">
-            Cycle #{cycleCount}
+          <Badge variant="outline" className="text-[10px] font-mono px-1.5">
+            #{cycleCount}
           </Badge>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="p-3 pt-0 space-y-3">
         {/* Progress Bar */}
         <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground">Loop Progress</span>
-            <span className="font-medium">{progress.toFixed(0)}%</span>
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="text-muted-foreground">Progress</span>
+            <span className="font-medium tabular-nums">{progress.toFixed(0)}%</span>
           </div>
-          <div className="h-2 bg-secondary rounded-full overflow-hidden">
+          <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
             <div
               className="h-full bg-primary rounded-full transition-all duration-500"
               style={{ width: `${progress}%` }}
@@ -101,23 +94,21 @@ export function LoopMonitor() {
           </div>
         </div>
 
-        {/* Steps List */}
-        <div className="space-y-2">
+        {/* Steps List - Compact */}
+        <div className="space-y-1">
           {steps.map((step, i) => (
             <div
               key={step.name}
               className={cn(
-                "flex items-center justify-between p-2 rounded-lg transition-all duration-300",
+                "flex items-center justify-between p-1.5 rounded text-[10px]",
                 step.status === 'running' ? 'bg-warning/10' :
                 step.status === 'complete' ? 'bg-primary/5' :
-                step.status === 'error' ? 'bg-destructive/10' : 'bg-secondary/30'
+                'bg-secondary/30'
               )}
-              style={{ animationDelay: `${i * 50}ms` }}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 {getStatusIcon(step.status)}
                 <span className={cn(
-                  "text-xs",
                   step.status === 'running' ? 'text-warning font-medium' :
                   step.status === 'complete' ? 'text-foreground' : 'text-muted-foreground'
                 )}>
@@ -125,7 +116,7 @@ export function LoopMonitor() {
                 </span>
               </div>
               {step.duration !== undefined && step.status === 'complete' && (
-                <span className="text-xs font-mono text-muted-foreground">
+                <span className="font-mono text-muted-foreground tabular-nums">
                   {step.duration}ms
                 </span>
               )}
@@ -134,20 +125,20 @@ export function LoopMonitor() {
         </div>
 
         {/* Summary Stats */}
-        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border">
+        <div className="grid grid-cols-3 gap-1.5 pt-1.5 border-t border-border">
           <div className="text-center">
-            <p className="text-lg font-bold text-primary">{positions.length}</p>
-            <p className="text-xs text-muted-foreground">Open</p>
+            <p className="text-sm font-bold text-primary tabular-nums">{positions.length}</p>
+            <p className="text-[9px] text-muted-foreground">Open</p>
           </div>
           <div className="text-center">
-            <p className="text-lg font-bold text-foreground">{signals.length}</p>
-            <p className="text-xs text-muted-foreground">Signals</p>
+            <p className="text-sm font-bold text-foreground tabular-nums">{signals.length}</p>
+            <p className="text-[9px] text-muted-foreground">Signals</p>
           </div>
           <div className="text-center">
-            <p className="text-lg font-bold text-foreground">
+            <p className="text-sm font-bold text-foreground tabular-nums">
               {engineMetrics.cycleTime > 0 ? `${(engineMetrics.cycleTime / 1000).toFixed(1)}s` : '--'}
             </p>
-            <p className="text-xs text-muted-foreground">Cycle</p>
+            <p className="text-[9px] text-muted-foreground">Cycle</p>
           </div>
         </div>
       </CardContent>

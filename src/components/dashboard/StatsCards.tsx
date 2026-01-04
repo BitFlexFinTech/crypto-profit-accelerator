@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useTrading } from '@/contexts/TradingContext';
-import { Card, CardContent } from '@/components/ui/card';
+import { StatCard } from '@/components/ui/stat-card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Target, Percent, RefreshCw } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Target, Percent, Activity, Wallet, Lock } from 'lucide-react';
 
 export function StatsCards() {
-  const { balances, trades, loading } = useTrading();
+  const { balances, trades, positions, loading } = useTrading();
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [secondsAgo, setSecondsAgo] = useState(0);
 
@@ -25,7 +25,9 @@ export function StatsCards() {
     }
   }, [balances]);
 
-  const totalBalance = balances.reduce((sum, b) => sum + b.total, 0);
+  const totalBalance = balances.reduce((sum, b) => sum + (b.total || 0), 0);
+  const availableBalance = balances.reduce((sum, b) => sum + (b.available || 0), 0);
+  const lockedBalance = balances.reduce((sum, b) => sum + (b.locked || 0), 0);
   
   // Calculate stats from trades
   const todayStart = new Date();
@@ -37,81 +39,70 @@ export function StatsCards() {
   
   const winningTrades = trades.filter(t => (t.net_profit || 0) > 0).length;
   const winRate = trades.length > 0 ? (winningTrades / trades.length) * 100 : 0;
-
-  const stats = [
-    {
-      title: 'Total Balance',
-      value: `$${totalBalance.toFixed(2)}`,
-      icon: DollarSign,
-      color: 'text-primary',
-      bgColor: 'bg-primary/10',
-      showSync: true,
-    },
-    {
-      title: "Today's P&L",
-      value: `${todayProfit >= 0 ? '+' : ''}$${todayProfit.toFixed(2)}`,
-      icon: todayProfit >= 0 ? TrendingUp : TrendingDown,
-      color: todayProfit >= 0 ? 'text-primary' : 'text-destructive',
-      bgColor: todayProfit >= 0 ? 'bg-primary/10' : 'bg-destructive/10',
-    },
-    {
-      title: 'Total Profit',
-      value: `${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}`,
-      icon: Target,
-      color: totalProfit >= 0 ? 'text-primary' : 'text-destructive',
-      bgColor: totalProfit >= 0 ? 'bg-primary/10' : 'bg-destructive/10',
-    },
-    {
-      title: 'Win Rate',
-      value: `${winRate.toFixed(1)}%`,
-      icon: Percent,
-      color: winRate >= 50 ? 'text-primary' : 'text-warning',
-      bgColor: winRate >= 50 ? 'bg-primary/10' : 'bg-warning/10',
-    },
-    {
-      title: "Today's Trades",
-      value: todayTrades.length.toString(),
-      icon: Activity,
-      color: 'text-foreground',
-      bgColor: 'bg-secondary',
-    },
-  ];
+  
+  // Active positions unrealized P&L
+  const unrealizedPnL = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
 
   if (loading) {
     return (
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        {[...Array(5)].map((_, i) => (
-          <Skeleton key={i} className="h-24" />
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+        {[...Array(6)].map((_, i) => (
+          <Skeleton key={i} className="h-20" />
         ))}
       </div>
     );
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-      {stats.map((stat, i) => (
-        <Card key={i} className="bg-card border-border">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-lg ${stat.bgColor}`}>
-                <stat.icon className={`h-4 w-4 ${stat.color}`} />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-muted-foreground">{stat.title}</p>
-                  {stat.showSync && (
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <RefreshCw className={`h-3 w-3 ${secondsAgo < 2 ? 'animate-spin text-primary' : ''}`} />
-                      <span>{secondsAgo}s</span>
-                    </div>
-                  )}
-                </div>
-                <p className={`text-lg font-bold ${stat.color}`}>{stat.value}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+    <div className="grid gap-3 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <StatCard
+        title="Total Balance"
+        value={`$${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+        icon={DollarSign}
+        trend="neutral"
+        showLive
+        syncTime={secondsAgo}
+      />
+      
+      <StatCard
+        title="Available"
+        value={`$${availableBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+        icon={Wallet}
+        trend="up"
+      />
+      
+      <StatCard
+        title="Locked"
+        value={`$${lockedBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+        subtitle={`${positions.length} position${positions.length !== 1 ? 's' : ''}`}
+        icon={Lock}
+        trend="neutral"
+      />
+      
+      <StatCard
+        title="Today's P&L"
+        value={`${todayProfit >= 0 ? '+' : ''}$${todayProfit.toFixed(2)}`}
+        subtitle={`${todayTrades.length} trades`}
+        icon={todayProfit >= 0 ? TrendingUp : TrendingDown}
+        trend={todayProfit >= 0 ? 'up' : 'down'}
+        showLive
+      />
+      
+      <StatCard
+        title="Unrealized P&L"
+        value={`${unrealizedPnL >= 0 ? '+' : ''}$${unrealizedPnL.toFixed(2)}`}
+        icon={Activity}
+        trend={unrealizedPnL >= 0 ? 'up' : 'down'}
+        showLive
+      />
+      
+      <StatCard
+        title="Win Rate"
+        value={`${winRate.toFixed(1)}%`}
+        subtitle={`${winningTrades}/${trades.length} wins`}
+        icon={winRate >= 50 ? Target : Percent}
+        trend={winRate >= 50 ? 'up' : winRate >= 30 ? 'neutral' : 'down'}
+      />
     </div>
   );
 }
