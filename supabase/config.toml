@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.close-position]
 verify_jwt = false
+
+[functions.test-connection]
+verify_jwt = false
