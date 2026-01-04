@@ -1,20 +1,23 @@
-import { useExchanges } from '@/hooks/useExchanges';
-import { useTrades } from '@/hooks/useTrades';
-import { useBotSettings } from '@/hooks/useBotSettings';
+import { useTrading } from '@/contexts/TradingContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TrendingUp, TrendingDown, DollarSign, Activity, Target, Percent } from 'lucide-react';
 
 export function StatsCards() {
-  const { getTotalBalance, loading: balanceLoading } = useExchanges();
-  const { getWinRate, getTotalProfit, getTodayStats, loading: tradesLoading } = useTrades();
-  const { settings } = useBotSettings();
+  const { balances, trades, loading } = useTrading();
 
-  const loading = balanceLoading || tradesLoading;
-  const totalBalance = getTotalBalance();
-  const winRate = getWinRate();
-  const totalProfit = getTotalProfit();
-  const todayStats = getTodayStats();
+  const totalBalance = balances.reduce((sum, b) => sum + b.total, 0);
+  
+  // Calculate stats from trades
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  
+  const todayTrades = trades.filter(t => new Date(t.created_at || '') >= todayStart);
+  const todayProfit = todayTrades.reduce((sum, t) => sum + (t.net_profit || 0), 0);
+  const totalProfit = trades.reduce((sum, t) => sum + (t.net_profit || 0), 0);
+  
+  const winningTrades = trades.filter(t => (t.net_profit || 0) > 0).length;
+  const winRate = trades.length > 0 ? (winningTrades / trades.length) * 100 : 0;
 
   const stats = [
     {
@@ -26,10 +29,10 @@ export function StatsCards() {
     },
     {
       title: "Today's P&L",
-      value: `${(todayStats?.net_profit || 0) >= 0 ? '+' : ''}$${(todayStats?.net_profit || 0).toFixed(2)}`,
-      icon: todayStats?.net_profit && todayStats.net_profit >= 0 ? TrendingUp : TrendingDown,
-      color: (todayStats?.net_profit || 0) >= 0 ? 'text-primary' : 'text-destructive',
-      bgColor: (todayStats?.net_profit || 0) >= 0 ? 'bg-primary/10' : 'bg-destructive/10',
+      value: `${todayProfit >= 0 ? '+' : ''}$${todayProfit.toFixed(2)}`,
+      icon: todayProfit >= 0 ? TrendingUp : TrendingDown,
+      color: todayProfit >= 0 ? 'text-primary' : 'text-destructive',
+      bgColor: todayProfit >= 0 ? 'bg-primary/10' : 'bg-destructive/10',
     },
     {
       title: 'Total Profit',
@@ -47,24 +50,17 @@ export function StatsCards() {
     },
     {
       title: "Today's Trades",
-      value: todayStats?.total_trades.toString() || '0',
+      value: todayTrades.length.toString(),
       icon: Activity,
       color: 'text-foreground',
       bgColor: 'bg-secondary',
-    },
-    {
-      title: 'Trading Mode',
-      value: settings?.is_paper_trading ? 'Paper' : 'Live',
-      icon: Activity,
-      color: settings?.is_paper_trading ? 'text-warning' : 'text-primary',
-      bgColor: settings?.is_paper_trading ? 'bg-warning/10' : 'bg-primary/10',
     },
   ];
 
   if (loading) {
     return (
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {[...Array(6)].map((_, i) => (
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        {[...Array(5)].map((_, i) => (
           <Skeleton key={i} className="h-24" />
         ))}
       </div>
@@ -72,7 +68,7 @@ export function StatsCards() {
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       {stats.map((stat, i) => (
         <Card key={i} className="bg-card border-border">
           <CardContent className="pt-4">

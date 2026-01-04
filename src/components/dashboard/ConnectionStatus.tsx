@@ -1,31 +1,31 @@
-import { useWebSocketPrices } from '@/hooks/useWebSocketPrices';
+import { useTrading } from '@/contexts/TradingContext';
 import { Badge } from '@/components/ui/badge';
 import { Wifi, WifiOff } from 'lucide-react';
 
 export function ConnectionStatus() {
-  const { connectionStates } = useWebSocketPrices();
+  const { connectionStates, exchanges } = useTrading();
   
-  const connectedCount = Object.values(connectionStates).filter(s => s.connected).length;
-  const totalCount = Object.keys(connectionStates).length;
+  const connectedExchanges = exchanges.filter(e => e.is_connected);
+  const activeConnections = Object.values(connectionStates).filter(s => s.connected).length;
 
-  if (totalCount === 0) {
+  if (connectedExchanges.length === 0) {
     return (
       <Badge variant="outline" className="text-xs text-muted-foreground">
         <WifiOff className="h-3 w-3 mr-1" />
-        No price feeds
+        No exchanges
       </Badge>
     );
   }
 
   return (
     <Badge 
-      variant={connectedCount > 0 ? 'default' : 'secondary'}
-      className={connectedCount > 0 ? 'bg-primary text-primary-foreground' : ''}
+      variant={activeConnections > 0 ? 'default' : 'secondary'}
+      className={activeConnections > 0 ? 'bg-primary text-primary-foreground' : ''}
     >
-      {connectedCount > 0 ? (
+      {activeConnections > 0 ? (
         <>
           <Wifi className="h-3 w-3 mr-1 animate-pulse" />
-          {connectedCount}/{totalCount} feeds live
+          {activeConnections}/{connectedExchanges.length} live
         </>
       ) : (
         <>
