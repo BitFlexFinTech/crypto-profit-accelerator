@@ -1,8 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTrading } from '@/contexts/TradingContext';
-import { Activity, CheckCircle2, XCircle, Clock, Zap, FlaskConical } from 'lucide-react';
+import { Activity, CheckCircle2, XCircle, Clock, Zap, FlaskConical, Ban } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -23,6 +24,8 @@ export function SignalDebugPanel() {
     engineMetrics, 
     isEngineRunning,
     testTradeTopSignal,
+    slowPairBlacklist,
+    getPairSpeedScore,
   } = useTrading();
 
   // Get thresholds based on aggressiveness
@@ -41,6 +44,7 @@ export function SignalDebugPanel() {
     if (signals.length === 0) return { reason: 'No signals from AI analysis', type: 'no_signals' };
     
     const topSignal = signals[0];
+    if (slowPairBlacklist.has(topSignal.symbol)) return { reason: `${topSignal.symbol} is blacklisted (slow)`, type: 'blacklisted' };
     if (topSignal.score < scoreThreshold) return { reason: `Score ${topSignal.score} < ${scoreThreshold} threshold`, type: 'low_score' };
     if (topSignal.confidence < confidenceThreshold) return { reason: `Confidence ${(topSignal.confidence * 100).toFixed(0)}% < ${(confidenceThreshold * 100).toFixed(0)}% threshold`, type: 'low_confidence' };
     
@@ -72,10 +76,11 @@ export function SignalDebugPanel() {
   };
 
   const canTestTrade = signals.length > 0 && connectedExchanges.length > 0;
+  const blacklistedCount = signals.filter(s => slowPairBlacklist.has(s.symbol)).length;
 
   return (
     <Card className="h-full overflow-hidden flex flex-col">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-3 flex-shrink-0">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <CardTitle className="flex items-center gap-2 text-base">
             <Activity className="h-4 w-4 text-primary" />
@@ -104,15 +109,15 @@ export function SignalDebugPanel() {
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="flex-1 overflow-hidden flex flex-col space-y-3">
         {/* Thresholds & Status */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm flex-shrink-0">
           <div className="p-2 rounded-lg bg-muted/50">
             <div className="text-muted-foreground text-xs">Score Threshold</div>
             <div className="font-mono font-semibold">≥ {scoreThreshold}</div>
           </div>
           <div className="p-2 rounded-lg bg-muted/50">
-            <div className="text-muted-foreground text-xs">Confidence Threshold</div>
+            <div className="text-muted-foreground text-xs">Confidence</div>
             <div className="font-mono font-semibold">≥ {(confidenceThreshold * 100).toFixed(0)}%</div>
           </div>
           <div className="p-2 rounded-lg bg-muted/50">
@@ -125,16 +130,27 @@ export function SignalDebugPanel() {
           </div>
         </div>
 
+        {/* Blacklist Info */}
+        {blacklistedCount > 0 && (
+          <div className="flex items-center gap-2 text-xs text-destructive bg-destructive/10 px-3 py-2 rounded-lg flex-shrink-0">
+            <Ban className="h-3 w-3" />
+            <span>{blacklistedCount} pair(s) blacklisted due to slow velocity (&gt;10 min avg)</span>
+          </div>
+        )}
+
         {/* Execution Status */}
         <div className={cn(
-          "p-3 rounded-lg border",
+          "p-3 rounded-lg border flex-shrink-0",
           blocker.type === 'ready' ? 'bg-green-500/10 border-green-500/30' :
           blocker.type === 'stopped' ? 'bg-muted border-muted' :
+          blocker.type === 'blacklisted' ? 'bg-destructive/10 border-destructive/30' :
           'bg-yellow-500/10 border-yellow-500/30'
         )}>
           <div className="flex items-center gap-2">
             {blocker.type === 'ready' ? (
               <Zap className="h-4 w-4 text-green-500" />
+            ) : blocker.type === 'blacklisted' ? (
+              <Ban className="h-4 w-4 text-destructive" />
             ) : (
               <Clock className="h-4 w-4 text-yellow-500" />
             )}
@@ -143,97 +159,119 @@ export function SignalDebugPanel() {
         </div>
 
         {/* Signals Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-muted-foreground text-xs border-b">
-                <th className="text-left py-2 px-2">#</th>
-                <th className="text-left py-2 px-2">Symbol</th>
-                <th className="text-center py-2 px-2">Score</th>
-                <th className="text-center py-2 px-2">Confidence</th>
-                <th className="text-center py-2 px-2">Direction</th>
-                <th className="text-center py-2 px-2">Type</th>
-                <th className="text-left py-2 px-2">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {signals.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-4 text-muted-foreground">
-                    No signals available - waiting for AI analysis
-                  </td>
+        <div className="flex-1 overflow-hidden">
+          <ScrollArea className="h-full">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-muted-foreground text-xs border-b sticky top-0 bg-card">
+                  <th className="text-left py-2 px-2">#</th>
+                  <th className="text-left py-2 px-2">Symbol</th>
+                  <th className="text-center py-2 px-2">Speed</th>
+                  <th className="text-center py-2 px-2">Score</th>
+                  <th className="text-center py-2 px-2">Conf</th>
+                  <th className="text-center py-2 px-2">Dir</th>
+                  <th className="text-left py-2 px-2">Status</th>
                 </tr>
-              ) : (
-                signals.slice(0, 8).map((signal, idx) => {
-                  const passesScore = signal.score >= scoreThreshold;
-                  const passesConfidence = signal.confidence >= confidenceThreshold;
-                  const isTop = idx === 0 && passesScore && passesConfidence;
-                  
-                  return (
-                    <tr key={`${signal.symbol}-${idx}`} className={cn(
-                      "border-b border-muted/50",
-                      isTop && "bg-green-500/5"
-                    )}>
-                      <td className="py-2 px-2 font-mono">{idx + 1}</td>
-                      <td className="py-2 px-2 font-semibold">{signal.symbol}</td>
-                      <td className="py-2 px-2 text-center">
-                        <span className="flex items-center justify-center gap-1 font-mono">
-                          {signal.score}
-                          {passesScore ? (
-                            <CheckCircle2 className="h-3 w-3 text-green-500" />
-                          ) : (
-                            <XCircle className="h-3 w-3 text-red-500" />
-                          )}
-                        </span>
-                      </td>
-                      <td className="py-2 px-2 text-center">
-                        <span className="flex items-center justify-center gap-1 font-mono">
-                          {(signal.confidence * 100).toFixed(0)}%
-                          {passesConfidence ? (
-                            <CheckCircle2 className="h-3 w-3 text-green-500" />
-                          ) : (
-                            <XCircle className="h-3 w-3 text-red-500" />
-                          )}
-                        </span>
-                      </td>
-                      <td className="py-2 px-2 text-center">
-                        <Badge variant={signal.direction === 'long' ? 'default' : 'destructive'} className="text-xs">
-                          {signal.direction.toUpperCase()}
-                        </Badge>
-                      </td>
-                      <td className="py-2 px-2 text-center">
-                        <Badge variant="outline" className="text-xs">
-                          {signal.tradeType}
-                        </Badge>
-                      </td>
-                      <td className="py-2 px-2">
-                        {isTop ? (
-                          <span className="flex items-center gap-1 text-green-500 font-medium">
-                            <Zap className="h-3 w-3" /> READY
+              </thead>
+              <tbody>
+                {signals.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="text-center py-4 text-muted-foreground">
+                      No signals available - waiting for AI analysis
+                    </td>
+                  </tr>
+                ) : (
+                  signals.slice(0, 10).map((signal, idx) => {
+                    const passesScore = signal.score >= scoreThreshold;
+                    const passesConfidence = signal.confidence >= confidenceThreshold;
+                    const isBlacklisted = slowPairBlacklist.has(signal.symbol);
+                    const speedScore = getPairSpeedScore(signal.symbol);
+                    const isTop = idx === 0 && passesScore && passesConfidence && !isBlacklisted;
+                    
+                    return (
+                      <tr key={`${signal.symbol}-${idx}`} className={cn(
+                        "border-b border-muted/50",
+                        isBlacklisted && "opacity-50 bg-destructive/5",
+                        isTop && "bg-green-500/5"
+                      )}>
+                        <td className="py-2 px-2 font-mono">{idx + 1}</td>
+                        <td className="py-2 px-2">
+                          <span className={cn("font-semibold", isBlacklisted && "line-through")}>
+                            {signal.symbol}
                           </span>
-                        ) : !passesScore ? (
-                          <span className="text-muted-foreground text-xs">Low score</span>
-                        ) : !passesConfidence ? (
-                          <span className="text-muted-foreground text-xs">Low conf</span>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">Queued</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                          {isBlacklisted && (
+                            <Badge variant="destructive" className="ml-1 text-[10px] px-1 py-0">
+                              SLOW
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-center">
+                          <span className={cn(
+                            "font-mono text-xs",
+                            speedScore >= 80 ? 'text-primary' :
+                            speedScore >= 50 ? 'text-yellow-500' :
+                            'text-destructive'
+                          )}>
+                            {speedScore}
+                          </span>
+                        </td>
+                        <td className="py-2 px-2 text-center">
+                          <span className="flex items-center justify-center gap-1 font-mono">
+                            {signal.score}
+                            {passesScore ? (
+                              <CheckCircle2 className="h-3 w-3 text-green-500" />
+                            ) : (
+                              <XCircle className="h-3 w-3 text-red-500" />
+                            )}
+                          </span>
+                        </td>
+                        <td className="py-2 px-2 text-center">
+                          <span className="flex items-center justify-center gap-1 font-mono">
+                            {(signal.confidence * 100).toFixed(0)}%
+                            {passesConfidence ? (
+                              <CheckCircle2 className="h-3 w-3 text-green-500" />
+                            ) : (
+                              <XCircle className="h-3 w-3 text-red-500" />
+                            )}
+                          </span>
+                        </td>
+                        <td className="py-2 px-2 text-center">
+                          <Badge variant={signal.direction === 'long' ? 'default' : 'destructive'} className="text-xs">
+                            {signal.direction.toUpperCase()}
+                          </Badge>
+                        </td>
+                        <td className="py-2 px-2">
+                          {isBlacklisted ? (
+                            <span className="flex items-center gap-1 text-destructive text-xs">
+                              <Ban className="h-3 w-3" /> Blacklisted
+                            </span>
+                          ) : isTop ? (
+                            <span className="flex items-center gap-1 text-green-500 font-medium text-xs">
+                              <Zap className="h-3 w-3" /> READY
+                            </span>
+                          ) : !passesScore ? (
+                            <span className="text-muted-foreground text-xs">Low score</span>
+                          ) : !passesConfidence ? (
+                            <span className="text-muted-foreground text-xs">Low conf</span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">Queued</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </ScrollArea>
         </div>
 
         {/* Engine Metrics */}
-        <div className="flex items-center gap-4 text-xs text-muted-foreground pt-2 border-t flex-wrap">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground pt-2 border-t flex-wrap flex-shrink-0">
           <span>Cycle: {engineMetrics.cycleTime}ms</span>
           <span>Analysis: {engineMetrics.analysisTime}ms</span>
-          <span>Execution: {engineMetrics.executionTime}ms</span>
+          <span>Exec: {engineMetrics.executionTime}ms</span>
           <span>Status: {engineStatus}</span>
-          <span>Exchanges: {connectedExchanges.length} connected</span>
         </div>
       </CardContent>
     </Card>

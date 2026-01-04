@@ -6,16 +6,8 @@ import { ConnectionStatus } from '@/components/dashboard/ConnectionStatus';
 import { EngineStatus } from '@/components/dashboard/EngineStatus';
 import { GlobalSyncButton } from '@/components/dashboard/GlobalSyncButton';
 import { RealTimePnL } from '@/components/dashboard/cards/RealTimePnL';
-import { MarketScanner } from '@/components/dashboard/cards/MarketScanner';
-import { TradeFlow } from '@/components/dashboard/cards/TradeFlow';
-import { ExecutionSpeed } from '@/components/dashboard/cards/ExecutionSpeed';
-import { VolatilityScanner } from '@/components/dashboard/cards/VolatilityScanner';
-import { TradeTiming } from '@/components/dashboard/cards/TradeTiming';
-import { LoopMonitor } from '@/components/dashboard/cards/LoopMonitor';
-import { SignalDebugPanel } from '@/components/dashboard/cards/SignalDebugPanel';
 import { TradeExecutionLogPanel } from '@/components/dashboard/cards/TradeExecutionLogPanel';
 import { TradeVelocityDashboard } from '@/components/dashboard/cards/TradeVelocityDashboard';
-import { TakeProfitStatusPanel } from '@/components/dashboard/cards/TakeProfitStatusPanel';
 
 export default function DashboardPage() {
   return (
@@ -37,34 +29,19 @@ export default function DashboardPage() {
 
       {/* Main Content - Fixed layout, no scroll */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Left Content Area */}
+        {/* Left Content Area - 2x2 Grid */}
         <div className="flex-1 flex flex-col p-2 gap-2 overflow-hidden min-w-0">
           {/* Stats Row - Compact */}
           <div className="flex-shrink-0">
             <StatsCards />
           </div>
 
-          {/* Main Grid - 3x2 grid with fixed proportions */}
-          <div className="flex-1 min-h-0 grid grid-cols-3 grid-rows-2 gap-2">
-            {/* Row 1 */}
+          {/* Main Grid - 2x2 layout */}
+          <div className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2 gap-2">
             <RealTimePnL />
             <TradeVelocityDashboard />
             <LiveSignals />
-            
-            {/* Row 2 */}
             <PositionsPanel />
-            <TakeProfitStatusPanel />
-            <SignalDebugPanel />
-          </div>
-
-          {/* Bottom Row - Compact mini cards, hidden on small screens */}
-          <div className="flex-shrink-0 hidden xl:grid grid-cols-6 gap-1.5 h-20">
-            <MarketScanner />
-            <TradeFlow />
-            <ExecutionSpeed />
-            <VolatilityScanner />
-            <TradeTiming />
-            <LoopMonitor />
           </div>
         </div>
 
