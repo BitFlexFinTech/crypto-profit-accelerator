@@ -88,6 +88,10 @@ interface TradingContextType {
   // Realtime sync tracking
   lastRealtimeUpdate: number;
   
+  // Velocity optimization
+  slowPairBlacklist: Set<string>;
+  getPairSpeedScore: (symbol: string) => number;
+  
   // Actions
   startBot: () => Promise<void>;
   stopBot: () => Promise<void>;
@@ -1628,6 +1632,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     isScanning,
     loading,
     lastRealtimeUpdate,
+    slowPairBlacklist,
+    getPairSpeedScore,
     startBot,
     stopBot,
     forceAnalyze,

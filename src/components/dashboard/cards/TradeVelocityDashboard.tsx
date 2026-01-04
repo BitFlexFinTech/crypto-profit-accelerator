@@ -1,14 +1,24 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useTrading } from '@/contexts/TradingContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Zap, TrendingUp, Clock, Target, Activity } from 'lucide-react';
-import { differenceInMinutes, differenceInSeconds, subHours, subMinutes } from 'date-fns';
+import { differenceInSeconds, subHours, subMinutes } from 'date-fns';
 
 export function TradeVelocityDashboard() {
   const { trades, positions, engineMetrics } = useTrading();
+  
+  // Force re-render every second for real-time updates
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const velocityMetrics = useMemo(() => {
+    // Force dependency on tick for real-time calculation
+    void tick;
+    
     const now = new Date();
     const oneHourAgo = subHours(now, 1);
     const fiveMinAgo = subMinutes(now, 5);
@@ -76,7 +86,7 @@ export function TradeVelocityDashboard() {
       activePositions: positions.length,
       tradesLastHour: tradesLastHour.length,
     };
-  }, [trades, positions]);
+  }, [trades, positions, tick]);
 
   const formatDuration = (seconds: number): string => {
     if (seconds < 60) return `${Math.round(seconds)}s`;
@@ -97,7 +107,7 @@ export function TradeVelocityDashboard() {
 
   return (
     <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
-      <CardHeader className="pb-2">
+      <CardHeader className="pb-2 flex-shrink-0">
         <CardTitle className="text-sm font-medium flex items-center gap-2">
           <Zap className="h-4 w-4 text-primary" />
           Trade Velocity
@@ -109,7 +119,7 @@ export function TradeVelocityDashboard() {
           </Badge>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="flex-1 overflow-y-auto space-y-3">
         {/* Primary Metrics */}
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-secondary/50 rounded p-3 text-center">
