@@ -656,11 +656,12 @@ async function placeExitOrder(
   
   if (!result.success) {
     console.error(`[${exchange.exchange}] EXIT ORDER FAILED: ${result.error}`);
-    return { 
-      orderId: "", 
-      executedPrice: currentPrice, 
-      isLive: false, 
-      error: result.error 
+    return {
+      orderId: "",
+      executedPrice: currentPrice,
+      isLive: false,
+      error: result.error,
+      noBalance: result.noBalance,
     };
   }
   
