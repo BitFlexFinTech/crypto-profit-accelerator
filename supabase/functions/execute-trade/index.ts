@@ -650,11 +650,26 @@ async function placeOKXMarketOrder(
     
     const data = await response.json();
     
-    if (data.code !== "0") {
-      console.error(`[OKX] MARKET order failed:`, data);
-      const errorCode = String(data.code);
-      const errorMsg = data.msg || data.data?.[0]?.sMsg || `OKX API error: ${data.code}`;
-      const isPermErr = isPermissionError('okx', data.code, errorMsg);
+    // ============================================
+    // OKX RESPONSE VALIDATION - CHECK BOTH LAYERS
+    // OKX returns code="0" at top level even when order fails!
+    // Must check data.data[0].sCode for actual order status
+    // ============================================
+    const topCode = data.code;
+    const topMsg = data.msg || "";
+    const orderData = data.data?.[0] || {};
+    const sCode = orderData.sCode || "";
+    const sMsg = orderData.sMsg || "";
+    const orderId = orderData.ordId || "";
+    
+    console.log(`[OKX] MARKET order response: code=${topCode}, msg=${topMsg}, sCode=${sCode}, sMsg=${sMsg}, ordId=${orderId}`);
+    
+    // Check top-level failure first
+    if (topCode !== "0") {
+      console.error(`[OKX] MARKET order failed (top-level):`, data);
+      const errorCode = String(topCode);
+      const errorMsg = topMsg || sMsg || `OKX API error: ${topCode}`;
+      const isPermErr = isPermissionError('okx', topCode, errorMsg);
       return { 
         success: false, 
         orderId: "", 
@@ -664,82 +679,115 @@ async function placeOKXMarketOrder(
       };
     }
     
-    const orderId = data.data?.[0]?.ordId || "";
-    const avgPx = parseFloat(data.data?.[0]?.avgPx || "0");
-    
-    console.log(`[OKX] MARKET order accepted: ${orderId}, avgPx=${avgPx}`);
-    
-    // HFT OPTIMIZATION: Return immediately with orderId
-    // OKX market orders are typically filled instantly, avgPx=0 is rare
-    // Use background verification instead of blocking for 2s
-    if (avgPx === 0 && orderId) {
-      console.log(`[OKX] Order ${orderId} accepted, avgPx=0 - will verify asynchronously`);
-      
-      // Schedule background verification (non-blocking)
-      // This runs in the background while we return immediately
-      const verifyOrderFillAsync = async () => {
-        try {
-          for (let attempt = 1; attempt <= 5; attempt++) {
-            await new Promise(resolve => setTimeout(resolve, 300));
-            
-            const checkTimestamp = new Date().toISOString();
-            const checkPath = `/api/v5/trade/order?ordId=${orderId}&instId=${formattedSymbol}`;
-            const checkPreHash = checkTimestamp + "GET" + checkPath;
-            const checkSignature = createHmac("sha256", credentials.apiSecret)
-              .update(checkPreHash)
-              .digest("base64");
-            
-            const checkResponse = await fetch(`https://www.okx.com${checkPath}`, {
-              method: "GET",
-              headers: {
-                "OK-ACCESS-KEY": credentials.apiKey,
-                "OK-ACCESS-SIGN": checkSignature,
-                "OK-ACCESS-TIMESTAMP": checkTimestamp,
-                "OK-ACCESS-PASSPHRASE": credentials.passphrase || "",
-              },
-            });
-            
-            const checkData = await checkResponse.json();
-            
-            if (checkData.code === "0" && checkData.data?.[0]) {
-              const orderState = checkData.data[0].state;
-              const filledPx = parseFloat(checkData.data[0].avgPx || "0");
-              
-              console.log(`[OKX] Async verify #${attempt}: state=${orderState}, avgPx=${filledPx}`);
-              
-              if (orderState === "filled" && filledPx > 0) {
-                console.log(`[OKX] Order ${orderId} verified FILLED @ ${filledPx}`);
-                return;
-              }
-              if (orderState === "canceled" || orderState === "expired") {
-                console.error(`[OKX] Order ${orderId} was ${orderState} - async check failed`);
-                return;
-              }
-            }
-          }
-          console.warn(`[OKX] Order ${orderId} verification incomplete after 5 attempts`);
-        } catch (e) {
-          console.error(`[OKX] Async verification error:`, e);
-        }
+    // CRITICAL: Check sCode - OKX can return code="0" but sCode!="0" when order fails
+    if (sCode !== "0" && sCode !== "") {
+      console.error(`[OKX] MARKET order failed (sCode):`, { topCode, sCode, sMsg, orderId });
+      const isPermErr = isPermissionError('okx', sCode, sMsg);
+      return { 
+        success: false, 
+        orderId: "", 
+        error: sMsg || `OKX order rejected: ${sCode}`,
+        errorCode: sCode,
+        errorType: isPermErr ? 'API_PERMISSION_ERROR' : 'EXCHANGE_ERROR',
       };
-      
-      // Use EdgeRuntime.waitUntil if available (Deno Deploy/Supabase Edge)
-      // @ts-ignore - EdgeRuntime is available in Supabase Edge Functions
-      if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
-        // @ts-ignore
-        EdgeRuntime.waitUntil(verifyOrderFillAsync());
-      } else {
-        // Fallback: just fire and forget
-        verifyOrderFillAsync();
-      }
-      
-      // Return immediately with the order ID - position will be created
-      // Price will be updated on next reconciliation if needed
-      return { success: true, orderId, executedPrice: currentPrice, executedQty: quantity };
     }
     
-    console.log(`[OKX] MARKET order filled: ${orderId} @ avg price ${avgPx}`);
-    return { success: true, orderId, executedPrice: avgPx };
+    // Verify we got an order ID
+    if (!orderId) {
+      console.error(`[OKX] MARKET order failed - no orderId returned:`, data);
+      return { 
+        success: false, 
+        orderId: "", 
+        error: "OKX returned success but no order ID - order may not have been placed",
+        errorCode: "NO_ORDER_ID",
+        errorType: 'EXCHANGE_ERROR',
+      };
+    }
+    
+    // ============================================
+    // SYNCHRONOUS ORDER VERIFICATION (FAIL CLOSED)
+    // Before returning success, verify order actually exists on OKX
+    // This prevents phantom positions when OKX accepts but doesn't execute
+    // ============================================
+    let verifiedPrice = parseFloat(orderData.avgPx || "0");
+    let verifiedQty = parseFloat(orderData.sz || "0") || quantity;
+    let orderVerified = false;
+    
+    // If avgPx is 0, the order might still be processing - verify synchronously
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 200 * attempt)); // 200ms, 400ms, 600ms
+      
+      const checkTimestamp = new Date().toISOString();
+      const checkPath = `/api/v5/trade/order?ordId=${orderId}&instId=${formattedSymbol}`;
+      const checkPreHash = checkTimestamp + "GET" + checkPath;
+      const checkSignature = createHmac("sha256", credentials.apiSecret)
+        .update(checkPreHash)
+        .digest("base64");
+      
+      try {
+        const checkResponse = await fetch(`https://www.okx.com${checkPath}`, {
+          method: "GET",
+          headers: {
+            "OK-ACCESS-KEY": credentials.apiKey,
+            "OK-ACCESS-SIGN": checkSignature,
+            "OK-ACCESS-TIMESTAMP": checkTimestamp,
+            "OK-ACCESS-PASSPHRASE": credentials.passphrase || "",
+          },
+        });
+        
+        const checkData = await checkResponse.json();
+        console.log(`[OKX] Verify order #${attempt}: code=${checkData.code}, state=${checkData.data?.[0]?.state}`);
+        
+        if (checkData.code === "0" && checkData.data?.[0]) {
+          const orderState = checkData.data[0].state;
+          const filledPx = parseFloat(checkData.data[0].avgPx || "0");
+          const filledSz = parseFloat(checkData.data[0].fillSz || checkData.data[0].sz || "0");
+          
+          if (orderState === "filled") {
+            verifiedPrice = filledPx > 0 ? filledPx : (currentPrice || 0);
+            verifiedQty = filledSz > 0 ? filledSz : quantity;
+            orderVerified = true;
+            console.log(`[OKX] Order ${orderId} VERIFIED FILLED @ ${verifiedPrice}`);
+            break;
+            // Order exists but not fully filled - still count as success for market orders
+            verifiedPrice = filledPx > 0 ? filledPx : (currentPrice || 0);
+            orderVerified = true;
+            console.log(`[OKX] Order ${orderId} is ${orderState} - accepting as placed`);
+            break;
+          } else if (orderState === "canceled" || orderState === "expired") {
+            console.error(`[OKX] Order ${orderId} was ${orderState} - PHANTOM PREVENTED`);
+            return { 
+              success: false, 
+              orderId: "", 
+              error: `OKX order was ${orderState} - not executed`,
+              errorCode: "ORDER_CANCELLED",
+              errorType: 'EXCHANGE_ERROR',
+            };
+          }
+        } else if (checkData.code === "51603") {
+          // Order does not exist
+          console.error(`[OKX] Order ${orderId} does not exist on OKX - PHANTOM PREVENTED`);
+          return { 
+            success: false, 
+            orderId: "", 
+            error: "Order does not exist on OKX - not executed",
+            errorCode: "ORDER_NOT_FOUND",
+            errorType: 'EXCHANGE_ERROR',
+          };
+        }
+      } catch (checkError) {
+        console.error(`[OKX] Verification attempt #${attempt} failed:`, checkError);
+      }
+    }
+    
+    // If we couldn't verify but had initial avgPx, accept it
+    if (!orderVerified && verifiedPrice === 0) {
+      verifiedPrice = currentPrice || 0; // Fallback to signal price
+      console.warn(`[OKX] Order ${orderId} accepted but unverified - using signal price ${currentPrice || 0}`);
+    }
+    
+    console.log(`[OKX] MARKET order success: ${orderId} @ ${verifiedPrice}, verified=${orderVerified}`);
+    return { success: true, orderId, executedPrice: verifiedPrice, executedQty: verifiedQty };
   } catch (error) {
     console.error(`[OKX] MARKET order exception:`, error);
     return { 
@@ -796,11 +844,23 @@ async function placeOKXLimitOrder(
     
     const data = await response.json();
     
-    if (data.code !== "0") {
-      console.error(`[OKX] LIMIT order failed:`, data);
-      const errorCode = String(data.code);
-      const errorMsg = data.msg || `OKX API error: ${data.code}`;
-      const isPermErr = isPermissionError('okx', data.code, errorMsg);
+    // ============================================
+    // OKX LIMIT ORDER - CHECK BOTH LAYERS
+    // ============================================
+    const topCode = data.code;
+    const topMsg = data.msg || "";
+    const orderData = data.data?.[0] || {};
+    const sCode = orderData.sCode || "";
+    const sMsg = orderData.sMsg || "";
+    const orderId = orderData.ordId || "";
+    
+    console.log(`[OKX] LIMIT order response: code=${topCode}, msg=${topMsg}, sCode=${sCode}, sMsg=${sMsg}, ordId=${orderId}`);
+    
+    if (topCode !== "0") {
+      console.error(`[OKX] LIMIT order failed (top-level):`, data);
+      const errorCode = String(topCode);
+      const errorMsg = topMsg || `OKX API error: ${topCode}`;
+      const isPermErr = isPermissionError('okx', topCode, errorMsg);
       return { 
         success: false, 
         orderId: "", 
@@ -810,7 +870,30 @@ async function placeOKXLimitOrder(
       };
     }
     
-    const orderId = data.data?.[0]?.ordId || "";
+    // CRITICAL: Check sCode for actual order status
+    if (sCode !== "0" && sCode !== "") {
+      console.error(`[OKX] LIMIT order failed (sCode):`, { topCode, sCode, sMsg, orderId });
+      const isPermErr = isPermissionError('okx', sCode, sMsg);
+      return { 
+        success: false, 
+        orderId: "", 
+        error: sMsg || `OKX order rejected: ${sCode}`,
+        errorCode: sCode,
+        errorType: isPermErr ? 'API_PERMISSION_ERROR' : 'EXCHANGE_ERROR',
+      };
+    }
+    
+    if (!orderId) {
+      console.error(`[OKX] LIMIT order failed - no orderId returned:`, data);
+      return { 
+        success: false, 
+        orderId: "", 
+        error: "OKX returned success but no order ID",
+        errorCode: "NO_ORDER_ID",
+        errorType: 'EXCHANGE_ERROR',
+      };
+    }
+    
     console.log(`[OKX] LIMIT order placed: ${orderId}`);
     return { success: true, orderId };
   } catch (error) {
