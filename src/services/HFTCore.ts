@@ -58,12 +58,13 @@ interface HFTState {
 // ============================================
 // CONSTANTS
 // ============================================
-const SAFE_MODE_LATENCY_THRESHOLD = 200; // ms - enter safe mode if RTT > this
-const SAFE_MODE_EXIT_THRESHOLD = 150; // ms - exit safe mode if RTT < this
-const CONSECUTIVE_HIGH_LATENCY_TRIGGER = 5; // consecutive checks before safe mode (increased for stability)
+// Relaxed thresholds: OKX/Bybit ping/pong can be 500-1500ms on typical networks
+const SAFE_MODE_LATENCY_THRESHOLD = 1200; // ms - enter safe mode if RTT > this
+const SAFE_MODE_EXIT_THRESHOLD = 800; // ms - exit safe mode if RTT < this
+const CONSECUTIVE_HIGH_LATENCY_TRIGGER = 5; // consecutive checks before safe mode
 const CONSECUTIVE_LOW_LATENCY_EXIT = 3; // consecutive checks before exiting safe mode
 const FAT_FINGER_DEVIATION_PERCENT = 2; // max price deviation from market
-const STALE_RTT_WINDOW_MS = 60000; // 60s - ignore RTT samples older than this
+const STALE_RTT_WINDOW_MS = 20000; // 20s - ignore RTT samples older than this (2.5x ping interval)
 const SAFE_MODE_MIN_DURATION_MS = 30000; // 30s - minimum time in safe mode before auto-exit
 
 // ============================================
@@ -292,12 +293,13 @@ class HFTCore {
         const status = connectionStatus[exchange];
         if (!status) return;
         
-        // Check if RTT sample is valid and fresh
-        // Valid means: connected AND latency > 0 AND lastPing is recent
+        // For Safe Mode, only use FRESH RTT samples from ping/pong (lastRttAt)
+        // Binance has no ping/pong so lastRttAt stays 0 - exclude from Safe Mode triggers
         const isConnected = status.connected;
         const hasValidRTT = status.latency > 0;
-        const isFreshSample = (now - status.lastPing) < STALE_RTT_WINDOW_MS;
-        const isValidSample = isConnected && hasValidRTT && isFreshSample;
+        const lastRttAt = (status as { lastRttAt?: number }).lastRttAt || 0;
+        const isFreshRttSample = lastRttAt > 0 && (now - lastRttAt) < STALE_RTT_WINDOW_MS;
+        const isValidSample = isConnected && hasValidRTT && isFreshRttSample;
         
         const heartbeat: LatencyHeartbeat = {
           exchange,
@@ -308,14 +310,14 @@ class HFTCore {
         
         this.state.lastHeartbeats[exchange] = heartbeat;
         
-        // Only record RTT if we have a valid measurement
+        // Only record RTT if we have a valid, fresh measurement
         if (isValidSample) {
           this.recordRTT(exchange, status.latency);
         }
         
         // Only update consecutive counters for valid RTT samples
+        // Invalid/stale/disconnected - reset both counters to prevent phantom triggers
         if (!isValidSample) {
-          // Invalid/stale/disconnected - reset both counters to prevent phantom triggers
           this.state.consecutiveHighLatency[exchange] = 0;
           this.state.consecutiveLowLatency[exchange] = 0;
           return;
