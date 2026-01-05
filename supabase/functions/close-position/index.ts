@@ -309,19 +309,25 @@ async function placeOKXMarketOrder(
     
     if (data.code !== "0") {
       console.error(`[OKX] EXIT order failed:`, data);
-      
-      // Check for insufficient balance error (51008) - asset may have been sold by TP order
-      const errorCode = data.data?.[0]?.sCode;
-      if (errorCode === "51008" || data.msg?.toLowerCase().includes("insufficient")) {
-        return { 
-          success: false, 
-          orderId: "", 
-          error: data.msg || `API error: ${data.code}`,
-          noBalance: true 
+
+      // OKX often returns a generic msg like "All operations failed".
+      // Prefer the per-operation error details when available.
+      const sCode = data.data?.[0]?.sCode as string | undefined;
+      const sMsg = data.data?.[0]?.sMsg as string | undefined;
+      const detailedMsg = sMsg || data.msg || `API error: ${data.code}`;
+
+      // Insufficient balance error (51008) - asset may have been sold by TP order
+      const normalized = detailedMsg.toLowerCase();
+      if (sCode === "51008" || normalized.includes("insufficient")) {
+        return {
+          success: false,
+          orderId: "",
+          error: detailedMsg,
+          noBalance: true,
         };
       }
-      
-      return { success: false, orderId: "", error: data.msg || `API error: ${data.code}` };
+
+      return { success: false, orderId: "", error: detailedMsg };
     }
     
     const orderId = data.data?.[0]?.ordId || "";
