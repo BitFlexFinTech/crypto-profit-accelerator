@@ -63,7 +63,7 @@ export function usePositions() {
 
   const closingPositionsRef = useRef<Set<string>>(new Set());
 
-  const closePosition = async (positionId: string) => {
+  const closePosition = async (positionId: string, requireProfit = true) => {
     // Prevent duplicate close attempts
     if (closingPositionsRef.current.has(positionId)) {
       console.log('Already closing position:', positionId);
@@ -72,9 +72,8 @@ export function usePositions() {
     closingPositionsRef.current.add(positionId);
 
     try {
-      // STRICT RULE: Always require profit when closing positions
       const { data, error } = await supabase.functions.invoke('close-position', {
-        body: { positionId, requireProfit: true },
+        body: { positionId, requireProfit },
       });
 
       if (error) throw error;

@@ -55,11 +55,12 @@ export default function PositionsPage() {
     await executeClose(positionId);
   };
 
-  const executeClose = async (positionId: string) => {
+  const executeClose = async (positionId: string, allowLoss = false) => {
     setClosingPositionId(positionId);
     setIsClosing(true);
     try {
-      await closePosition(positionId);
+      // If allowLoss is true (user confirmed), pass requireProfit=false
+      await closePosition(positionId, !allowLoss);
       toast.success('Position Closed', { dismissible: true });
     } catch {
       toast.error('Failed to close position', { dismissible: true });
@@ -154,7 +155,7 @@ export default function PositionsPage() {
               className="gap-2"
             >
               <AlertTriangle className="h-4 w-4" />
-              Close All Positions
+              Close All Profitable
             </Button>
           )}
         </div>
@@ -370,7 +371,7 @@ export default function PositionsPage() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isClosing}>Wait for Profit</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => lossConfirmPosition && executeClose(lossConfirmPosition.id)}
+              onClick={() => lossConfirmPosition && executeClose(lossConfirmPosition.id, true)}
               disabled={isClosing}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

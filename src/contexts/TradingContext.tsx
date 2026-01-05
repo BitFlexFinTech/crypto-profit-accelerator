@@ -98,7 +98,7 @@ interface TradingContextType {
   startBot: () => Promise<void>;
   stopBot: () => Promise<void>;
   forceAnalyze: () => Promise<TradingSignal[]>;
-  closePosition: (positionId: string) => Promise<void>;
+  closePosition: (positionId: string, requireProfit?: boolean) => Promise<void>;
   closeAllPositions: () => Promise<void>;
   refreshData: () => Promise<void>;
   syncBalances: () => Promise<void>;
@@ -1227,15 +1227,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Close position - STRICT: Always requires profit
-  const closePosition = useCallback(async (positionId: string) => {
+  // Close position - requireProfit defaults to true, but can be overridden for manual loss close
+  const closePosition = useCallback(async (positionId: string, requireProfit = true) => {
     try {
-      // STRICT: Always require profit validation
       await invokeWithRetry(() => 
         supabase.functions.invoke('close-position', { 
           body: { 
             positionId,
-            requireProfit: true, // STRICT: Never close at a loss
+            requireProfit,
           } 
         })
       );
@@ -1447,7 +1446,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     
     // Start the interval
     if (!balanceSyncRef.current) {
-      console.log('📊 Starting auto balance sync (every 30s)');
+      console.log('📊 Starting auto balance sync (every 5s)');
       balanceSyncRef.current = setInterval(autoSyncBalances, BALANCE_SYNC_INTERVAL);
     }
     

@@ -1,7 +1,7 @@
 export type ExchangeName = 'binance' | 'okx' | 'nexo' | 'bybit' | 'kucoin' | 'hyperliquid';
 export type TradeType = 'spot' | 'futures';
 export type PositionDirection = 'long' | 'short';
-export type PositionStatus = 'open' | 'closed' | 'cancelled';
+export type PositionStatus = 'open' | 'closing' | 'closed' | 'cancelled';
 export type NotificationType = 'trade_opened' | 'trade_closed' | 'profit_target_hit' | 'error' | 'warning' | 'info';
 
 export interface BotSettings {
