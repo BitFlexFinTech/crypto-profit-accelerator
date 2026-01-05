@@ -6,14 +6,24 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Track connected VPS instances
-const connectedVPS = new Map<string, WebSocket>();
+// Track connected VPS instances with metadata
+interface VPSConnection {
+  socket: WebSocket;
+  lastPing: number;
+  latencyMs: number;
+  messagesPerSecond: number;
+  messageCount: number;
+  connectedAt: number;
+}
+
+const connectedVPS = new Map<string, VPSConnection>();
 
 // Message types
 interface WSMessage {
-  type: 'register' | 'heartbeat' | 'price_update' | 'trade_executed' | 'equity_update' | 'position_sync' | 'error' | 'execute_trade' | 'cancel_order' | 'sync_positions' | 'update_config';
+  type: 'register' | 'heartbeat' | 'price_update' | 'trade_executed' | 'equity_update' | 'position_sync' | 'error' | 'execute_trade' | 'cancel_order' | 'sync_positions' | 'update_config' | 'ping';
   deployment_id?: string;
   data?: unknown;
+  timestamp?: number;
 }
 
 serve(async (req) => {
@@ -51,14 +61,28 @@ serve(async (req) => {
     socket.onmessage = async (event) => {
       try {
         const message: WSMessage = JSON.parse(event.data);
-        console.log('[hft-ws] Received message:', message.type);
+        const now = Date.now();
+        
+        // Track message count for throughput
+        if (deploymentId && connectedVPS.has(deploymentId)) {
+          const conn = connectedVPS.get(deploymentId)!;
+          conn.messageCount++;
+          conn.lastPing = now;
+        }
 
         switch (message.type) {
           case 'register':
             // VPS instance registering with deployment ID
             deploymentId = message.deployment_id || null;
             if (deploymentId) {
-              connectedVPS.set(deploymentId, socket);
+              connectedVPS.set(deploymentId, {
+                socket,
+                lastPing: now,
+                latencyMs: 0,
+                messagesPerSecond: 0,
+                messageCount: 0,
+                connectedAt: now,
+              });
               
               // Update deployment status in database
               await supabase
@@ -72,25 +96,47 @@ serve(async (req) => {
               socket.send(JSON.stringify({
                 type: 'registered',
                 deployment_id: deploymentId,
-                timestamp: Date.now()
+                timestamp: now
               }));
 
               console.log(`[hft-ws] VPS registered: ${deploymentId}`);
             }
             break;
 
+          case 'ping':
+            // Respond with pong for latency measurement
+            socket.send(JSON.stringify({
+              type: 'pong',
+              timestamp: now,
+              originalTimestamp: message.timestamp
+            }));
+            
+            // Calculate latency if timestamp provided
+            if (message.timestamp && deploymentId && connectedVPS.has(deploymentId)) {
+              const latency = now - message.timestamp;
+              const conn = connectedVPS.get(deploymentId)!;
+              conn.latencyMs = latency;
+            }
+            break;
+
           case 'heartbeat':
-            // Update last heartbeat timestamp
+            // Update last heartbeat timestamp with latency tracking
             if (deploymentId) {
+              const conn = connectedVPS.get(deploymentId);
+              const uptime = conn ? Math.floor((now - conn.connectedAt) / 1000) : 0;
+              const latency = conn?.latencyMs || 0;
+              
               await supabase
                 .from('vps_deployments')
-                .update({ last_heartbeat: new Date().toISOString() })
+                .update({ 
+                  last_heartbeat: new Date().toISOString(),
+                })
                 .eq('id', deploymentId);
             }
             
             socket.send(JSON.stringify({
               type: 'heartbeat_ack',
-              timestamp: Date.now()
+              timestamp: now
             }));
             break;
 
@@ -160,7 +206,9 @@ serve(async (req) => {
         // Update deployment status
         await supabase
           .from('vps_deployments')
-          .update({ websocket_connected: false })
+          .update({ 
+            websocket_connected: false,
+          })
           .eq('id', deploymentId);
       }
     };

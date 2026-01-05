@@ -145,10 +145,8 @@ export default function PositionsPage() {
         </Card>
         <Card className="bg-card border-border">
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Unrealized P&L</p>
-            <p className={`text-2xl font-bold ${totalPnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
-              {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
-            </p>
+            <p className="text-sm text-muted-foreground">Open Positions</p>
+            <p className="text-2xl font-bold text-foreground">{positions.length}</p>
           </CardContent>
         </Card>
       </div>

@@ -16,9 +16,6 @@ export function AllocationChart() {
     .filter(t => t.status === 'closed')
     .reduce((sum, t) => sum + (t.net_profit || 0), 0);
 
-  // Calculate unrealized P&L
-  const unrealizedPnL = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
-
   const data = [
     {
       name: 'Available',
@@ -29,12 +26,6 @@ export function AllocationChart() {
       name: 'In Positions',
       value: lockedInPositions,
       color: 'hsl(var(--warning))',
-    },
-    {
-      name: 'Unrealized P&L',
-      value: Math.abs(unrealizedPnL),
-      color: unrealizedPnL >= 0 ? 'hsl(var(--primary))' : 'hsl(var(--destructive))',
-      isNegative: unrealizedPnL < 0,
     },
     {
       name: 'Realized Profit',

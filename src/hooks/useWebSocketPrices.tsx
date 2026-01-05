@@ -22,7 +22,7 @@ const WS_ENDPOINTS: Record<string, string> = {
 };
 
 export function useWebSocketPrices() {
-  const { positions, updatePositionPrice } = usePositions();
+  const { positions } = usePositions();
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [connectionStates, setConnectionStates] = useState<Record<string, WebSocketState>>({});
   const wsRefs = useRef<Record<string, WebSocket>>({});
@@ -33,14 +33,7 @@ export function useWebSocketPrices() {
 
   const handlePriceUpdate = useCallback((symbol: string, price: number) => {
     setPrices(prev => ({ ...prev, [symbol]: price }));
-    
-    // Update positions with new price
-    positions
-      .filter(p => p.symbol === symbol)
-      .forEach(p => {
-        updatePositionPrice(p.id, price);
-      });
-  }, [positions, updatePositionPrice]);
+  }, []);
 
   const connectToBinance = useCallback((symbols: string[]) => {
     if (symbols.length === 0) return;

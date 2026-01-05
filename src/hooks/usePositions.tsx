@@ -154,39 +154,7 @@ export function usePositions() {
     }
   };
 
-  const updatePositionPrice = (positionId: string, currentPrice: number) => {
-    setPositions(prev => prev.map(p => {
-      if (p.id !== positionId) return p;
-      
-      // Calculate gross PnL
-      let grossPnl: number;
-      if (p.direction === 'long') {
-        grossPnl = (currentPrice - p.entry_price) * p.quantity * (p.leverage || 1);
-      } else {
-        grossPnl = (p.entry_price - currentPrice) * p.quantity * (p.leverage || 1);
-      }
-      
-      // Calculate fees (matching the checkProfitTargets calculation)
-      const feeRate = p.trade_type === 'spot' ? 0.001 : 0.0005;
-      const entryFee = p.order_size_usd * feeRate;
-      const exitFee = p.order_size_usd * feeRate;
-      const fundingFee = p.trade_type === 'futures' ? p.order_size_usd * 0.0001 : 0;
-      const totalFees = entryFee + exitFee + fundingFee;
-      
-      // Net PnL after all fees
-      const netPnl = grossPnl - totalFees;
-      
-      return {
-        ...p,
-        current_price: currentPrice,
-        unrealized_pnl: netPnl,
-      };
-    }));
-  };
-
-  const getTotalUnrealizedPnl = (): number => {
-    return positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
-  };
+  // Removed estimated PnL calculation - using live exchange equity instead
 
   const reconcilePositions = async (autoFix = false) => {
     try {
@@ -212,8 +180,6 @@ export function usePositions() {
     loading,
     closePosition,
     closeAllPositions,
-    updatePositionPrice,
-    getTotalUnrealizedPnl,
     reconcilePositions,
     refetch: fetchPositions,
   };

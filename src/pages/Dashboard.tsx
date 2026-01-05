@@ -11,6 +11,7 @@ import { TradeVelocityDashboard } from '@/components/dashboard/cards/TradeVeloci
 import { RateLimitStatusPanel } from '@/components/dashboard/cards/RateLimitStatusPanel';
 import { TradeExecutionSpeedPanel } from '@/components/dashboard/cards/TradeExecutionSpeedPanel';
 import { SafeModeOverlay } from '@/components/dashboard/SafeModeOverlay';
+import { VPSStatusPanel } from '@/components/dashboard/cards/VPSStatusPanel';
 
 export default function DashboardPage() {
   return (
@@ -56,15 +57,18 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Right Panel - Trade Execution Log + Performance */}
+        {/* Right Panel - Trade Execution Log + VPS Status + Performance */}
         <div className="w-64 flex-shrink-0 border-l border-border overflow-hidden flex flex-col">
           <div className="flex-1 min-h-0 overflow-hidden">
             <TradeExecutionLogPanel />
           </div>
-          <div className="h-44 border-t border-border overflow-hidden">
+          <div className="h-36 border-t border-border overflow-hidden">
+            <VPSStatusPanel />
+          </div>
+          <div className="h-32 border-t border-border overflow-hidden">
             <RateLimitStatusPanel />
           </div>
-          <div className="h-48 border-t border-border overflow-hidden">
+          <div className="h-36 border-t border-border overflow-hidden">
             <TradeExecutionSpeedPanel />
           </div>
         </div>
