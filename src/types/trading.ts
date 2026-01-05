@@ -144,6 +144,36 @@ export interface SetupProgress {
   updated_at: string;
 }
 
+// VPS Deployment types
+export type CloudProvider = 'digitalocean' | 'aws' | 'oracle' | 'gcp';
+export type VPSStatus = 'pending' | 'deploying' | 'running' | 'stopped' | 'error';
+
+export interface VPSDeployment {
+  id: string;
+  user_id: string;
+  provider: CloudProvider;
+  region: string;
+  region_city: string;
+  instance_id: string;
+  ip_address: string;
+  status: VPSStatus;
+  websocket_endpoint: string;
+  websocket_connected: boolean;
+  last_heartbeat: string;
+  error_message?: string;
+  monthly_cost_estimate?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RegionConfig {
+  code: string;
+  city: string;
+  country: string;
+  flag: string;
+  latencyEstimate: string;
+}
+
 export interface ExchangeConfig {
   name: ExchangeName;
   displayName: string;
