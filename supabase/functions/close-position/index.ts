@@ -651,32 +651,60 @@ serve(async (req) => {
 
     // ============================================
     // STEP 1.5: VERIFY PROFIT TARGET BEFORE EXIT (STRICT RULE)
+    // Recalculate PnL with CURRENT price to prevent stale DB values allowing losses
     // ============================================
     if (requireProfit) {
-      const estimatedPnL = position.unrealized_pnl || 0;
-      const profitTarget = position.profit_target || 0;
+      const currentPrice = requestedExitPrice || position.current_price || position.entry_price;
+      const profitTarget = position.profit_target || 0.50; // Default $0.50 if not set
       
-      if (estimatedPnL < profitTarget) {
+      // Calculate actual PnL with fees (same formula as final calculation)
+      const feeRate = tradeType === "spot" ? 0.001 : 0.0005;
+      const entryFee = position.order_size_usd * feeRate;
+      const exitFee = position.order_size_usd * feeRate;
+      const fundingFee = tradeType === "futures" ? position.order_size_usd * 0.0001 : 0;
+      
+      let grossPnL: number;
+      if (position.direction === "long") {
+        grossPnL = (currentPrice - position.entry_price) * position.quantity * (position.leverage || 1);
+      } else {
+        grossPnL = (position.entry_price - currentPrice) * position.quantity * (position.leverage || 1);
+      }
+      
+      const actualNetPnL = grossPnL - entryFee - exitFee - fundingFee;
+      
+      console.log(`=== PROFIT CHECK ===`);
+      console.log(`Entry: $${position.entry_price}, Current: $${currentPrice}`);
+      console.log(`Gross PnL: $${grossPnL.toFixed(4)}, Fees: $${(entryFee + exitFee + fundingFee).toFixed(4)}`);
+      console.log(`Actual Net PnL: $${actualNetPnL.toFixed(4)}, Required: $${profitTarget.toFixed(2)}`);
+      
+      if (actualNetPnL < profitTarget) {
         console.log("=== PROFIT TARGET NOT MET - BLOCKING CLOSE ===");
-        console.log(`Current PnL: $${estimatedPnL.toFixed(2)}, Required: $${profitTarget.toFixed(2)}`);
         
-        // Revert position back to open
+        // Update position with current calculated PnL
         await supabase
           .from("positions")
-          .update({ status: "open" })
+          .update({ 
+            status: "open",
+            current_price: currentPrice,
+            unrealized_pnl: actualNetPnL,
+          })
           .eq("id", positionId);
         
         return new Response(JSON.stringify({
           success: false,
           blocked: true,
-          message: `Waiting for profit target: Need +$${profitTarget.toFixed(2)}, currently at ${estimatedPnL >= 0 ? '+' : ''}$${estimatedPnL.toFixed(2)}`,
+          message: `Waiting for profit: Need +$${profitTarget.toFixed(2)}, currently at ${actualNetPnL >= 0 ? '+' : ''}$${actualNetPnL.toFixed(4)}`,
           profitRequired: profitTarget,
-          currentPnL: estimatedPnL,
+          currentPnL: actualNetPnL,
+          currentPrice,
+          entryPrice: position.entry_price,
         }), {
           status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      
+      console.log("=== PROFIT TARGET MET - PROCEEDING WITH CLOSE ===");
     }
 
     // ============================================
