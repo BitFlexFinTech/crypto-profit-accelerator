@@ -308,27 +308,44 @@ serve(async (req) => {
 
       // STRICT RULE: NEVER auto-close positions - only flag as stuck for review
       // Positions must ONLY close when profit target is hit
-      if (availableBalance < quantity * 0.1) {
-        console.warn(`[TP Retry] STUCK: ${position.symbol} - Insufficient balance (${availableBalance.toFixed(8)}/${quantity.toFixed(8)}). Flagging for review, NOT closing.`);
+      const balanceRatio = quantity > 0 ? availableBalance / quantity : 0;
+      
+      // If balance is less than 95% of required, flag as stuck (won't have enough to fulfill TP)
+      if (balanceRatio < 0.95) {
+        console.warn(`[TP Retry] STUCK: ${position.symbol} - Insufficient balance (${availableBalance.toFixed(8)}/${quantity.toFixed(8)} = ${(balanceRatio * 100).toFixed(1)}%). Flagging for review, NOT closing.`);
         
         await supabase
           .from("positions")
           .update({
             take_profit_status: "stuck",
-            reconciliation_note: `Balance mismatch: Exchange has ${availableBalance.toFixed(8)}, DB expects ${quantity.toFixed(8)}. Needs manual verification.`,
+            reconciliation_note: `Balance mismatch: Exchange has ${availableBalance.toFixed(8)}, DB expects ${quantity.toFixed(8)} (${(balanceRatio * 100).toFixed(1)}%). Needs manual verification.`,
             updated_at: new Date().toISOString(),
           })
           .eq("id", position.id);
         
-        autoClosedInsufficient++; // Rename to flaggedStuck in response
+        autoClosedInsufficient++;
         continue;
+      }
+
+      // Smart sync: If balance is between 95% and 100%, use available balance and sync DB
+      let effectiveQuantity = quantity;
+      if (balanceRatio >= 0.95 && balanceRatio < 1.0) {
+        effectiveQuantity = availableBalance * 0.999; // Use 99.9% to leave room for rounding
+        console.log(`[TP Retry] Syncing quantity for ${position.symbol}: ${quantity.toFixed(8)} → ${effectiveQuantity.toFixed(8)}`);
+        
+        // Update DB quantity to match exchange balance
+        await supabase.from('positions').update({
+          quantity: availableBalance,
+          reconciliation_note: `Quantity synced from exchange: ${quantity.toFixed(8)} → ${availableBalance.toFixed(8)}`,
+          updated_at: new Date().toISOString(),
+        }).eq('id', position.id);
       }
 
       // Calculate TP side based on direction
       const tpSide = position.direction === "long" ? "SELL" : "BUY";
       const tpPrice = Number(position.take_profit_price);
 
-      console.log(`[TP Retry] ${position.symbol}: Attempting ${tpSide} @ ${tpPrice}`);
+      console.log(`[TP Retry] ${position.symbol}: Attempting ${tpSide} @ ${tpPrice} (qty: ${effectiveQuantity.toFixed(8)})`);
       retried++;
 
       let result: { success: boolean; orderId?: string; error?: string };
@@ -340,7 +357,7 @@ serve(async (req) => {
             position.symbol,
             tpSide,
             tpPrice,
-            quantity,
+            effectiveQuantity,
             position.trade_type
           );
           break;
@@ -350,7 +367,7 @@ serve(async (req) => {
             position.symbol,
             tpSide,
             tpPrice,
-            quantity,
+            effectiveQuantity,
             position.trade_type
           );
           break;
