@@ -73,6 +73,21 @@ const EXCHANGE_LIMITS: Record<ExchangeName, RateLimitConfig> = {
 // Danger threshold (percentage of capacity used)
 const DANGER_THRESHOLD = 0.8;
 
+// Auto-throttling levels and multipliers
+const THROTTLE_THRESHOLDS = {
+  normal: 0.60,    // 0-60% usage
+  warning: 0.80,   // 60-80% usage
+  danger: 0.95,    // 80-95% usage
+  critical: 1.0,   // 95%+ usage
+} as const;
+
+const THROTTLE_MULTIPLIERS: Record<'normal' | 'warning' | 'danger' | 'critical', number> = {
+  normal: 1.0,      // Allow all requests
+  warning: 0.5,     // 50% chance to proceed
+  danger: 0.25,     // 25% chance to proceed
+  critical: 0.0,    // Block all requests
+};
+
 class RateLimiter {
   private requests: Map<ExchangeName, RequestRecord[]> = new Map();
   private queues: Map<ExchangeName, Array<() => void>> = new Map();
@@ -257,6 +272,61 @@ class RateLimiter {
     return false;
   }
 
+  // Get current throttle level based on usage
+  getThrottleLevel(exchange: ExchangeName): 'normal' | 'warning' | 'danger' | 'critical' {
+    const bucket = this.buckets.get(exchange);
+    const config = EXCHANGE_LIMITS[exchange];
+    if (!bucket) return 'normal';
+    
+    // Calculate usage based on bucket tokens
+    const bucketUsage = 1 - (bucket.tokens / config.bucketSize);
+    
+    // Also check API-reported weight usage
+    let apiUsage = 0;
+    if (bucket.usedWeight > 0) {
+      apiUsage = bucket.usedWeight / bucket.weightLimit;
+    }
+    
+    // Use the higher of the two
+    const usage = Math.max(bucketUsage, apiUsage);
+    
+    if (usage >= THROTTLE_THRESHOLDS.danger) return 'critical';
+    if (usage >= THROTTLE_THRESHOLDS.warning) return 'danger';
+    if (usage >= THROTTLE_THRESHOLDS.normal) return 'warning';
+    return 'normal';
+  }
+  
+  // Get throttle multiplier (0.0 to 1.0)
+  getThrottleMultiplier(exchange: ExchangeName): number {
+    const level = this.getThrottleLevel(exchange);
+    return THROTTLE_MULTIPLIERS[level];
+  }
+  
+  // Check if request should be throttled (delayed/blocked)
+  shouldThrottle(exchange: ExchangeName): boolean {
+    const multiplier = this.getThrottleMultiplier(exchange);
+    
+    // Critical - block all
+    if (multiplier === 0) return true;
+    
+    // Normal - allow all
+    if (multiplier === 1) return false;
+    
+    // Probabilistic throttling: random chance based on multiplier
+    return Math.random() > multiplier;
+  }
+  
+  // Get suggested delay in ms for throttled requests
+  getThrottleDelayMs(exchange: ExchangeName): number {
+    const level = this.getThrottleLevel(exchange);
+    switch (level) {
+      case 'critical': return 5000;  // 5 seconds
+      case 'danger': return 2000;    // 2 seconds
+      case 'warning': return 500;    // 500ms
+      default: return 0;
+    }
+  }
+
   async waitForSlot(exchange: ExchangeName, weight: number = 1): Promise<void> {
     if (this.canMakeRequest(exchange, weight)) {
       this.recordRequest(exchange, weight);
@@ -299,6 +369,8 @@ class RateLimiter {
     isDangerous: boolean;
     apiWeight?: number;
     apiWeightLimit?: number;
+    throttleLevel: 'normal' | 'warning' | 'danger' | 'critical';
+    throttleMultiplier: number;
   } {
     this.leakBucket(exchange);
     this.cleanOldRequests(exchange);
@@ -316,6 +388,8 @@ class RateLimiter {
       isDangerous: this.isDangerous(exchange),
       apiWeight: bucket?.usedWeight || undefined,
       apiWeightLimit: bucket?.usedWeight ? bucket.weightLimit : undefined,
+      throttleLevel: this.getThrottleLevel(exchange),
+      throttleMultiplier: this.getThrottleMultiplier(exchange),
     };
   }
 

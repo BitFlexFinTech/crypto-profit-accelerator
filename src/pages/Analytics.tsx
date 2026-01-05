@@ -42,7 +42,10 @@ import { TradePerformancePanel } from '@/components/dashboard/cards/TradePerform
 import { PairPerformanceLeaderboard } from '@/components/dashboard/cards/PairPerformanceLeaderboard';
 import { TakeProfitStatusPanel } from '@/components/dashboard/cards/TakeProfitStatusPanel';
 import { SignalDebugPanel } from '@/components/dashboard/cards/SignalDebugPanel';
+import { RateLimitStatusPanel } from '@/components/dashboard/cards/RateLimitStatusPanel';
+import { TradeExecutionSpeedPanel } from '@/components/dashboard/cards/TradeExecutionSpeedPanel';
 import { EXCHANGE_CONFIGS } from '@/types/trading';
+import { Zap } from 'lucide-react';
 
 export default function AnalyticsPage() {
   const { trades: contextTrades, positions, balances, signals, engineMetrics, isEngineRunning } = useTrading();
@@ -306,6 +309,22 @@ export default function AnalyticsPage() {
             <TabsContent value="connections" className="h-full m-0 overflow-hidden">
               <ScrollArea className="h-full">
                 <div className="space-y-3 pr-3">
+                  {/* System Performance Section */}
+                  <Card className="bg-card border-border">
+                    <CardHeader className="py-2 px-3">
+                      <CardTitle className="text-xs font-medium flex items-center gap-1.5">
+                        <Zap className="h-3 w-3 text-primary" />
+                        System Performance
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        <RateLimitStatusPanel />
+                        <TradeExecutionSpeedPanel />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  
                   <div className="max-w-xl">
                     <WebSocketStatusPanel />
                   </div>

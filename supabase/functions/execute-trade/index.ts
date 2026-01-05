@@ -232,6 +232,154 @@ function calculateTakeProfitPrice(
 }
 
 // ============================================
+// PRE-TRADE BALANCE CHECK
+// ============================================
+interface BalanceCheckResult {
+  hasBalance: boolean;
+  available: number;
+  required: number;
+  error?: string;
+}
+
+async function checkAvailableBalance(
+  credentials: ExchangeCredentials,
+  tradeType: "spot" | "futures",
+  requiredUsd: number,
+  symbol: string
+): Promise<BalanceCheckResult> {
+  try {
+    console.log(`[Balance Check] Checking ${credentials.exchange} ${tradeType} balance for $${requiredUsd}`);
+    
+    switch (credentials.exchange) {
+      case "binance": {
+        if (tradeType === "futures") {
+          // Binance Futures balance check
+          const timestamp = Date.now();
+          const params = new URLSearchParams({ timestamp: timestamp.toString() });
+          const signature = createHmac("sha256", credentials.apiSecret)
+            .update(params.toString())
+            .digest("hex");
+          
+          const response = await fetch(
+            `https://fapi.binance.com/fapi/v2/balance?${params}&signature=${signature}`,
+            { headers: { "X-MBX-APIKEY": credentials.apiKey } }
+          );
+          
+          if (!response.ok) {
+            return { hasBalance: false, available: 0, required: requiredUsd, error: "Failed to fetch balance" };
+          }
+          
+          const data = await response.json();
+          const usdtBalance = data.find((b: { asset: string }) => b.asset === "USDT");
+          const available = parseFloat(usdtBalance?.availableBalance || "0");
+          
+          console.log(`[Binance Futures] Available balance: $${available.toFixed(2)}`);
+          return { hasBalance: available >= requiredUsd, available, required: requiredUsd };
+        } else {
+          // Binance Spot balance check
+          const timestamp = Date.now();
+          const params = new URLSearchParams({ timestamp: timestamp.toString() });
+          const signature = createHmac("sha256", credentials.apiSecret)
+            .update(params.toString())
+            .digest("hex");
+          
+          const response = await fetch(
+            `https://api.binance.com/api/v3/account?${params}&signature=${signature}`,
+            { headers: { "X-MBX-APIKEY": credentials.apiKey } }
+          );
+          
+          if (!response.ok) {
+            return { hasBalance: false, available: 0, required: requiredUsd, error: "Failed to fetch balance" };
+          }
+          
+          const data = await response.json();
+          const usdtBalance = data.balances?.find((b: { asset: string }) => b.asset === "USDT");
+          const available = parseFloat(usdtBalance?.free || "0");
+          
+          console.log(`[Binance Spot] Available USDT: $${available.toFixed(2)}`);
+          return { hasBalance: available >= requiredUsd, available, required: requiredUsd };
+        }
+      }
+      
+      case "okx": {
+        // OKX balance check
+        const timestamp = new Date().toISOString();
+        const preHash = timestamp + "GET" + "/api/v5/account/balance";
+        const signature = createHmac("sha256", credentials.apiSecret)
+          .update(preHash)
+          .digest("base64");
+        
+        const response = await fetch("https://www.okx.com/api/v5/account/balance", {
+          headers: {
+            "OK-ACCESS-KEY": credentials.apiKey,
+            "OK-ACCESS-SIGN": signature,
+            "OK-ACCESS-TIMESTAMP": timestamp,
+            "OK-ACCESS-PASSPHRASE": credentials.passphrase || "",
+          },
+        });
+        
+        const data = await response.json();
+        
+        if (data.code !== "0") {
+          return { hasBalance: false, available: 0, required: requiredUsd, error: data.msg || "Failed to fetch balance" };
+        }
+        
+        // Find available equity in USDT
+        const details = data.data?.[0]?.details || [];
+        const usdtDetail = details.find((d: { ccy: string }) => d.ccy === "USDT");
+        const available = parseFloat(usdtDetail?.availBal || usdtDetail?.availEq || "0");
+        
+        console.log(`[OKX] Available balance: $${available.toFixed(2)}`);
+        return { hasBalance: available >= requiredUsd, available, required: requiredUsd };
+      }
+      
+      case "bybit": {
+        // Bybit balance check
+        const timestamp = Date.now().toString();
+        const recvWindow = "5000";
+        const params = `accountType=${tradeType === "futures" ? "CONTRACT" : "UNIFIED"}`;
+        const preHash = timestamp + credentials.apiKey + recvWindow + params;
+        const signature = createHmac("sha256", credentials.apiSecret)
+          .update(preHash)
+          .digest("hex");
+        
+        const response = await fetch(
+          `https://api.bybit.com/v5/account/wallet-balance?${params}`,
+          {
+            headers: {
+              "X-BAPI-API-KEY": credentials.apiKey,
+              "X-BAPI-SIGN": signature,
+              "X-BAPI-TIMESTAMP": timestamp,
+              "X-BAPI-RECV-WINDOW": recvWindow,
+            },
+          }
+        );
+        
+        const data = await response.json();
+        
+        if (data.retCode !== 0) {
+          return { hasBalance: false, available: 0, required: requiredUsd, error: data.retMsg || "Failed to fetch balance" };
+        }
+        
+        const coins = data.result?.list?.[0]?.coin || [];
+        const usdtCoin = coins.find((c: { coin: string }) => c.coin === "USDT");
+        const available = parseFloat(usdtCoin?.availableToWithdraw || usdtCoin?.walletBalance || "0");
+        
+        console.log(`[Bybit] Available balance: $${available.toFixed(2)}`);
+        return { hasBalance: available >= requiredUsd, available, required: requiredUsd };
+      }
+      
+      default:
+        return { hasBalance: true, available: requiredUsd, required: requiredUsd }; // Skip check for unknown exchanges
+    }
+  } catch (error) {
+    console.error(`[Balance Check] Error:`, error);
+    // On error, allow trade to proceed (don't block due to check failure)
+    return { hasBalance: true, available: requiredUsd, required: requiredUsd };
+  }
+}
+
+// ============================================
 // BINANCE - PLACE MARKET ORDER (ENTRY)
 // ============================================
 async function placeBinanceMarketOrder(
@@ -984,6 +1132,42 @@ serve(async (req) => {
     // Determine entry side
     const entrySide = tradeRequest.direction === "long" ? "BUY" : "SELL";
     
+    // ============================================
+    // STEP 0.5: PRE-TRADE BALANCE CHECK (LIVE ONLY)
+    // ============================================
+    if (!tradeRequest.isPaperTrade && exchange.api_key_encrypted && exchange.api_secret_encrypted) {
+      console.log("=== STEP 0.5: PRE-TRADE BALANCE CHECK ===");
+      
+      const credentials: ExchangeCredentials = {
+        exchange: exchange.exchange,
+        apiKey: exchange.api_key_encrypted,
+        apiSecret: exchange.api_secret_encrypted,
+        passphrase: exchange.passphrase_encrypted || undefined,
+      };
+      
+      const balanceCheck = await checkAvailableBalance(
+        credentials,
+        tradeRequest.tradeType,
+        tradeRequest.orderSizeUsd,
+        tradeRequest.symbol
+      );
+      
+      if (!balanceCheck.hasBalance) {
+        console.error(`=== INSUFFICIENT BALANCE: $${balanceCheck.available.toFixed(2)} < $${balanceCheck.required.toFixed(2)} ===`);
+        return new Response(JSON.stringify({
+          success: false,
+          error: `Insufficient ${tradeRequest.tradeType} balance: $${balanceCheck.available.toFixed(2)} available, need $${balanceCheck.required.toFixed(2)}`,
+          errorType: "INSUFFICIENT_BALANCE",
+          suggestion: `Add funds to your ${exchange.exchange} ${tradeRequest.tradeType} account or reduce order size.`,
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      
+      console.log(`Balance check passed: $${balanceCheck.available.toFixed(2)} >= $${balanceCheck.required.toFixed(2)}`);
+    }
+
     // ============================================
     // STEP 1: PLACE ENTRY ORDER ON EXCHANGE
     // ============================================
