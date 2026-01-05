@@ -1,6 +1,6 @@
 import { useTrading } from '@/contexts/TradingContext';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Brain, Loader2, AlertCircle, Zap, Search, Wifi } from 'lucide-react';
+import { Activity, Brain, Loader2, AlertCircle, Zap, Search, Wifi, Clock } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { wsManager } from '@/services/ExchangeWebSocketManager';
 import { useEffect, useState } from 'react';
@@ -9,6 +9,7 @@ export function EngineStatus() {
   const { engineStatus, isEngineRunning, engineMetrics, signals, positions, trades } = useTrading();
   const [wsLatency, setWsLatency] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
+  const [secondsUntilNextRun, setSecondsUntilNextRun] = useState(60);
 
   // Track WebSocket connection status
   useEffect(() => {
@@ -19,6 +20,22 @@ export function EngineStatus() {
     
     checkWsStatus();
     const interval = setInterval(checkWsStatus, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Calculate countdown to next pg_cron execution (runs at :00 of each minute)
+  useEffect(() => {
+    const calculateNextRun = () => {
+      const now = new Date();
+      const secondsInCurrentMinute = now.getSeconds();
+      return 60 - secondsInCurrentMinute;
+    };
+    
+    setSecondsUntilNextRun(calculateNextRun());
+    const interval = setInterval(() => {
+      setSecondsUntilNextRun(calculateNextRun());
+    }, 1000);
+    
     return () => clearInterval(interval);
   }, []);
 
@@ -146,6 +163,31 @@ export function EngineStatus() {
                 </p>
               )}
             </div>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+
+      {/* Cron Scheduler Status */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge className={`${isEngineRunning 
+            ? (secondsUntilNextRun <= 10 
+              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 animate-pulse' 
+              : 'bg-blue-500/20 text-blue-400 border-blue-500/30')
+            : 'bg-secondary text-muted-foreground border-muted'} border cursor-help`}>
+            <Clock className="h-3 w-3" />
+            <span className="ml-1">{secondsUntilNextRun}s</span>
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <div className="text-xs space-y-1">
+            <p className="font-medium">Auto-Trade Scheduler</p>
+            <p>Next run in: {secondsUntilNextRun}s</p>
+            <p className="text-muted-foreground">
+              {isEngineRunning 
+                ? 'Will analyze markets & execute trades' 
+                : 'Bot stopped — will skip execution'}
+            </p>
           </div>
         </TooltipContent>
       </Tooltip>
