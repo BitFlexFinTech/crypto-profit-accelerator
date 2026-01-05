@@ -259,6 +259,14 @@ serve(async (req) => {
           continue;
         }
 
+        // SKIP FUTURES POSITIONS: They don't hold spot balances, they use margin
+        // Checking spot balance for futures/shorts would incorrectly mark them as MISSING
+        if (pos.trade_type === "futures" || pos.direction === "short") {
+          console.log(`[Reconcile] Skipping ${pos.symbol} (${pos.trade_type}/${pos.direction}) - not spot balance`);
+          matched++;
+          continue;
+        }
+
         // Extract base asset from symbol (e.g., "BTC" from "BTC/USDT")
         const baseAsset = pos.symbol.split("/")[0].toUpperCase();
         const exchangeBalance = balances[baseAsset] || 0;

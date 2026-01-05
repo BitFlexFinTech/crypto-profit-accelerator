@@ -436,20 +436,28 @@ function calculateScore(
   data: MarketData, 
   aggressiveness: string, 
   historicalPerf?: HistoricalPerformance,
-  technicals?: TechnicalIndicators
+  technicals?: TechnicalIndicators,
+  exchange?: string
 ): { score: number; speedRating: string; rejected: boolean } {
   
-  // 🚨 HARD SPEED FILTER: Reject pairs with slow historical performance
-  if (historicalPerf && historicalPerf.tradeCount >= 5 && historicalPerf.avgDurationSec > 180) {
-    console.log(`REJECTED ${data.symbol}: avg ${Math.round(historicalPerf.avgDurationSec)}s > 180s limit`);
+  // 🚨 SPEED FILTER: Only reject if we have SIGNIFICANT history (10+ trades)
+  // For new exchanges (like OKX), allow trades to build history
+  const hasSignificantHistory = historicalPerf && historicalPerf.tradeCount >= 10;
+  
+  if (hasSignificantHistory && historicalPerf!.avgDurationSec > 300) {
+    // Only reject truly slow pairs (5+ min average) with proven history
+    console.log(`REJECTED ${data.symbol}: avg ${Math.round(historicalPerf!.avgDurationSec)}s > 300s limit`);
     return { score: 0, speedRating: "slow", rejected: true };
   }
   
-  // Reject low win rate pairs
-  if (historicalPerf && historicalPerf.tradeCount >= 5 && historicalPerf.winRate < 0.4) {
-    console.log(`REJECTED ${data.symbol}: win rate ${(historicalPerf.winRate * 100).toFixed(0)}% < 40%`);
+  // Reject very low win rate pairs (only with significant history)
+  if (hasSignificantHistory && historicalPerf!.winRate < 0.35) {
+    console.log(`REJECTED ${data.symbol}: win rate ${(historicalPerf!.winRate * 100).toFixed(0)}% < 35%`);
     return { score: 0, speedRating: "low-win", rejected: true };
   }
+  
+  // For exchanges with NO history, use assumed fast speed (allows new exchanges like OKX)
+  const assumedFastSpeed = !historicalPerf || historicalPerf.tradeCount < 3;
 
   // Base volatility score (higher volatility = faster profit)
   const volatilityScore = calculateVolatility(data.high24h, data.low24h, data.price) === "high" ? 35 : 
@@ -488,8 +496,13 @@ function calculateScore(
     }
   }
   
-  // ⚡ SPEED BOOST: Proven fast pairs get major bonus
-  if (historicalPerf && historicalPerf.tradeCount >= 3) {
+  // ⚡ SPEED BOOST: For exchanges with NO history, assume they're fast (NEW EXCHANGE BONUS)
+  if (assumedFastSpeed) {
+    baseScore += 15; // Give new exchanges a chance
+    speedRating = "assumed-fast";
+    console.log(`[Speed] ${data.symbol}: New exchange/pair, assumed fast (+15 score)`);
+  } else if (historicalPerf && historicalPerf.tradeCount >= 3) {
+    // ⚡ SPEED BOOST: Proven fast pairs get major bonus
     if (historicalPerf.avgDurationSec < 60) {
       baseScore += 30; // Under 1 min = EXCELLENT
       speedRating = "ultra-fast";
