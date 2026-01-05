@@ -257,6 +257,17 @@ class HFTCore {
         };
       }
       
+      // Check 8: Auto-Throttling
+      if (rateLimiter.shouldThrottle(params.exchange)) {
+        const level = rateLimiter.getThrottleLevel(params.exchange);
+        const multiplier = rateLimiter.getThrottleMultiplier(params.exchange);
+        return {
+          allowed: false,
+          reason: `Rate limit throttling (${level}) - ${Math.round((1 - multiplier) * 100)}% reduced`,
+          suggestion: `Order delayed - ${params.exchange} at ${level} capacity`,
+        };
+      }
+      
       return { allowed: true };
     } catch (error) {
       // Fallback: allow trade if risk check fails (don't block due to bugs)

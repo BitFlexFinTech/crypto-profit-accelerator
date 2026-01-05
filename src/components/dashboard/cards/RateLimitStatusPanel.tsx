@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { rateLimiter } from '@/services/RateLimiter';
-import { Shield, AlertTriangle, Activity } from 'lucide-react';
+import { Shield, AlertTriangle, Activity, Gauge } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type ExchangeName = 'binance' | 'okx' | 'nexo' | 'bybit' | 'kucoin' | 'hyperliquid';
@@ -17,6 +17,8 @@ interface ExchangeStatus {
   isDangerous: boolean;
   apiWeight?: number;
   apiWeightLimit?: number;
+  throttleLevel?: 'normal' | 'warning' | 'danger' | 'critical';
+  throttleMultiplier?: number;
 }
 
 const EXCHANGE_DISPLAY: Record<ExchangeName, { name: string; color: string }> = {
@@ -123,7 +125,13 @@ export function RateLimitStatusPanel() {
               {status.isDangerous && (
                 <div className="flex items-center gap-1 text-[9px] text-destructive animate-pulse">
                   <AlertTriangle className="h-2.5 w-2.5" />
-                  Rate limit critical - throttling active
+                  Rate limit critical
+                  {status.throttleMultiplier !== undefined && status.throttleMultiplier < 1 && (
+                    <span className="ml-1 flex items-center gap-0.5">
+                      <Gauge className="h-2.5 w-2.5" />
+                      Throttling: {Math.round((1 - status.throttleMultiplier) * 100)}% reduced
+                    </span>
+                  )}
                 </div>
               )}
             </div>
