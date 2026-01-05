@@ -375,6 +375,19 @@ async function placeOKXMarketOrder(
     const formattedSymbol = formatSymbol(symbol, "okx", tradeType);
     
     const formattedQty = formatQuantity(quantity, symbol, "okx", tradeType);
+    
+    // VALIDATION: Prevent 0 contract orders for OKX futures
+    if (tradeType === "futures" && (formattedQty === "0" || parseInt(formattedQty, 10) < 1)) {
+      console.error(`[OKX] Order size too small: ${quantity} -> ${formattedQty} contracts`);
+      return { 
+        success: false, 
+        orderId: "", 
+        error: "Order size too small for minimum contract size. Increase order size or choose a different pair.",
+        errorCode: "MIN_CONTRACT",
+        errorType: 'EXCHANGE_ERROR',
+      };
+    }
+    
     const body = JSON.stringify({
       instId: formattedSymbol,
       tdMode: tradeType === "futures" ? "cross" : "cash",
@@ -1065,15 +1078,22 @@ serve(async (req) => {
                errorMessage.toLowerCase().includes('insufficient')) {
       errorType = "INSUFFICIENT_BALANCE";
       suggestion = "Add more funds to your exchange account or reduce order size.";
+    } else if (errorMessage.toLowerCase().includes('minimum') || 
+               errorMessage.toLowerCase().includes('contract size') ||
+               errorMessage.toLowerCase().includes('order amount')) {
+      errorType = "EXCHANGE_ERROR";
+      suggestion = "Order size is too small for this pair. Increase order size or try a different trading pair.";
     }
     
+    // Return HTTP 200 with success:false for expected business/exchange failures
+    // This prevents the client from seeing opaque "non-2xx status code" errors
     return new Response(JSON.stringify({
       success: false,
       error: errorMessage,
       errorType,
       suggestion,
     }), {
-      status: 500,
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

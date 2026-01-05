@@ -197,6 +197,13 @@ export function useTradingEngine() {
       });
 
       if (error) throw error;
+      
+      // Check business-level success from response payload
+      if (data && data.success === false) {
+        const errMsg = data.error || 'Trade execution failed';
+        const suggestion = data.suggestion ? ` ${data.suggestion}` : '';
+        throw new Error(`${errMsg}${suggestion}`);
+      }
 
       setEngineState(prev => ({
         ...prev,

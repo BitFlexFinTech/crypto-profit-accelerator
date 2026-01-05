@@ -843,6 +843,24 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       );
       
       const execTime = Date.now() - execStart;
+      
+      // Check business-level success from response payload
+      if (response && response.success === false) {
+        const errorMessage = response.error || 'Trade execution failed';
+        const isPermissionError = response.errorType === 'API_PERMISSION_ERROR' ||
+                                   errorMessage.toLowerCase().includes('permission') || 
+                                   errorMessage.toLowerCase().includes('api-key');
+        appendExecutionLog({
+          type: isPermissionError ? 'API_PERMISSION_ERROR' : 'TRADE_FAILED',
+          message: `Trade execution failed: ${errorMessage}`,
+          symbol: signal.symbol,
+          errorType: response.errorType || 'EXCHANGE_ERROR',
+          suggestion: response.suggestion || (isPermissionError ? 'Check API key permissions in Settings' : undefined),
+        });
+        console.error(`❌ Trade execution failed (${execTime}ms): ${errorMessage}`);
+        return false;
+      }
+      
       console.log(`✅ Trade executed in ${execTime}ms`);
 
       appendExecutionLog({
