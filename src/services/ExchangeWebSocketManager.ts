@@ -17,6 +17,7 @@ interface PriceUpdate {
 interface ConnectionState {
   connected: boolean;
   lastPing: number;
+  lastRttAt: number; // When latency was last measured via ping/pong
   reconnectAttempts: number;
   status: 'connected' | 'connecting' | 'disconnected' | 'error';
   latency: number;
@@ -40,7 +41,7 @@ const WS_ENDPOINTS: Record<string, string> = {
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_BASE_DELAY = 1000;
-const PING_INTERVAL = 30000;
+const PING_INTERVAL = 8000; // 8s for frequent RTT updates (was 30s)
 
 class ExchangeWebSocketManager {
   private static instance: ExchangeWebSocketManager | null = null;
@@ -63,6 +64,7 @@ class ExchangeWebSocketManager {
       this.connectionStates.set(exchange, {
         connected: false,
         lastPing: 0,
+        lastRttAt: 0,
         reconnectAttempts: 0,
         status: 'disconnected',
         latency: 0,
@@ -184,14 +186,14 @@ class ExchangeWebSocketManager {
       
       ws.onopen = () => {
         console.log(`✅ Binance WebSocket connected`);
-        // Don't use handshake time as RTT - set to 0 (neutral)
-        // Binance doesn't support app-level ping/pong, so we rely on message activity
+        // Binance doesn't support app-level ping/pong - latency stays 0 (excluded from Safe Mode)
         this.updateConnectionState(exchange, {
           connected: true,
           status: 'connected',
           lastPing: Date.now(),
+          lastRttAt: 0, // Never updated for Binance
           reconnectAttempts: 0,
-          latency: 0, // Neutral - no RTT measurement for Binance
+          latency: 0,
         });
         this.startPingInterval(exchange, ws);
       };
@@ -258,13 +260,14 @@ class ExchangeWebSocketManager {
           args: symbols.map(s => ({ channel: 'tickers', instId: s.replace('/', '-') })),
         }));
         
-        // Don't use handshake time as RTT - set to 0 (neutral) until real ping/pong
+        // Don't use handshake time as RTT - wait for real ping/pong
         this.updateConnectionState(exchange, {
           connected: true,
           status: 'connected',
           lastPing: Date.now(),
+          lastRttAt: 0, // Will be updated when pong arrives
           reconnectAttempts: 0,
-          latency: 0, // Will be updated by ping/pong
+          latency: 0,
         });
         this.startPingInterval(exchange, ws);
       };
@@ -275,8 +278,9 @@ class ExchangeWebSocketManager {
           if (event.data === 'pong') {
             const sentAt = this.lastPingSentAt.get(exchange);
             if (sentAt) {
-              const rtt = Date.now() - sentAt;
-              this.updateConnectionState(exchange, { latency: rtt, lastPing: Date.now() });
+              const now = Date.now();
+              const rtt = now - sentAt;
+              this.updateConnectionState(exchange, { latency: rtt, lastPing: now, lastRttAt: now });
             }
             return;
           }
@@ -345,13 +349,14 @@ class ExchangeWebSocketManager {
           args: symbols.map(s => `tickers.${s.replace('/', '')}`),
         }));
         
-        // Don't use handshake time as RTT - set to 0 (neutral) until real ping/pong
+        // Don't use handshake time as RTT - wait for real ping/pong
         this.updateConnectionState(exchange, {
           connected: true,
           status: 'connected',
           lastPing: Date.now(),
+          lastRttAt: 0, // Will be updated when pong arrives
           reconnectAttempts: 0,
-          latency: 0, // Will be updated by ping/pong
+          latency: 0,
         });
         this.startPingInterval(exchange, ws);
       };
@@ -364,8 +369,9 @@ class ExchangeWebSocketManager {
           if (data.op === 'pong' || data.ret_msg === 'pong') {
             const sentAt = this.lastPingSentAt.get(exchange);
             if (sentAt) {
-              const rtt = Date.now() - sentAt;
-              this.updateConnectionState(exchange, { latency: rtt, lastPing: Date.now() });
+              const now = Date.now();
+              const rtt = now - sentAt;
+              this.updateConnectionState(exchange, { latency: rtt, lastPing: now, lastRttAt: now });
             }
             return;
           }
@@ -433,6 +439,7 @@ class ExchangeWebSocketManager {
     const current = this.connectionStates.get(exchange) || {
       connected: false,
       lastPing: 0,
+      lastRttAt: 0,
       reconnectAttempts: 0,
       status: 'disconnected' as const,
       latency: 0,

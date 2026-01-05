@@ -373,9 +373,9 @@ async function checkAvailableBalance(
         return { hasBalance: true, available: requiredUsd, required: requiredUsd }; // Skip check for unknown exchanges
     }
   } catch (error) {
-    console.error(`[Balance Check] Error:`, error);
-    // On error, allow trade to proceed (don't block due to check failure)
-    return { hasBalance: true, available: requiredUsd, required: requiredUsd };
+    console.error(`[Balance Check] NETWORK ERROR - failing closed for LIVE trades:`, error);
+    // FAIL CLOSED: Block trade if we can't verify balance (prevents phantom trades)
+    return { hasBalance: false, available: 0, required: requiredUsd, error: "Balance check failed - network error" };
   }
 }
 
@@ -666,6 +666,74 @@ async function placeOKXMarketOrder(
     
     const orderId = data.data?.[0]?.ordId || "";
     const avgPx = parseFloat(data.data?.[0]?.avgPx || "0");
+    
+    console.log(`[OKX] MARKET order accepted: ${orderId}, avgPx=${avgPx}`);
+    
+    // CRITICAL: For LIVE trades, verify order is actually filled before returning success
+    // OKX can return ordId but avgPx=0 if order is not immediately filled
+    if (avgPx === 0 || !orderId) {
+      // Poll order status to confirm fill (max 5 attempts, 400ms apart = 2s total)
+      console.log(`[OKX] Verifying order fill status...`);
+      
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 400));
+        
+        try {
+          const checkTimestamp = new Date().toISOString();
+          const checkPath = `/api/v5/trade/order?ordId=${orderId}&instId=${formattedSymbol}`;
+          const checkPreHash = checkTimestamp + "GET" + checkPath;
+          const checkSignature = createHmac("sha256", credentials.apiSecret)
+            .update(checkPreHash)
+            .digest("base64");
+          
+          const checkResponse = await fetch(`https://www.okx.com${checkPath}`, {
+            method: "GET",
+            headers: {
+              "OK-ACCESS-KEY": credentials.apiKey,
+              "OK-ACCESS-SIGN": checkSignature,
+              "OK-ACCESS-TIMESTAMP": checkTimestamp,
+              "OK-ACCESS-PASSPHRASE": credentials.passphrase || "",
+            },
+          });
+          
+          const checkData = await checkResponse.json();
+          
+          if (checkData.code === "0" && checkData.data?.[0]) {
+            const orderState = checkData.data[0].state;
+            const filledPx = parseFloat(checkData.data[0].avgPx || "0");
+            const filledSz = parseFloat(checkData.data[0].accFillSz || "0");
+            
+            console.log(`[OKX] Order status check #${attempt}: state=${orderState}, avgPx=${filledPx}, accFillSz=${filledSz}`);
+            
+            if (orderState === "filled" && filledPx > 0) {
+              console.log(`[OKX] Order confirmed FILLED @ ${filledPx}`);
+              return { success: true, orderId, executedPrice: filledPx, executedQty: filledSz };
+            }
+            
+            if (orderState === "canceled" || orderState === "expired") {
+              console.error(`[OKX] Order was ${orderState} - NOT filled`);
+              return { 
+                success: false, 
+                orderId: "", 
+                error: `Order ${orderState} by exchange - entry not executed`,
+                errorType: 'EXCHANGE_ERROR',
+              };
+            }
+          }
+        } catch (checkError) {
+          console.warn(`[OKX] Order status check #${attempt} failed:`, checkError);
+        }
+      }
+      
+      // After 5 attempts, order still not confirmed filled
+      console.error(`[OKX] Order ${orderId} NOT confirmed filled after verification - aborting`);
+      return { 
+        success: false, 
+        orderId: "", 
+        error: "Entry order not confirmed filled on exchange after 2s",
+        errorType: 'EXCHANGE_ERROR',
+      };
+    }
     
     console.log(`[OKX] MARKET order filled: ${orderId} @ avg price ${avgPx}`);
     return { success: true, orderId, executedPrice: avgPx };
