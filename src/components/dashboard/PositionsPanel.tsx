@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { TrendingUp, TrendingDown, AlertTriangle, Loader2, X, RefreshCcw, CheckCircle, AlertCircle, HelpCircle } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertTriangle, Loader2, X, RefreshCcw, CheckCircle, AlertCircle, HelpCircle, ArrowRightLeft } from 'lucide-react';
 import { EXCHANGE_CONFIGS } from '@/types/trading';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
 
 export function PositionsPanel() {
   const { 
@@ -292,6 +293,11 @@ export function PositionsPanel() {
                                 PHANTOM
                               </Badge>
                             )}
+                            {verification?.status === 'QUANTITY_MISMATCH' && verification.exchange_quantity !== undefined && (
+                              <Badge variant="outline" className="text-[8px] px-0.5 py-0 bg-yellow-500/10 text-yellow-400 border-yellow-500/30">
+                                Sync: {verification.exchange_quantity.toFixed(4)}
+                              </Badge>
+                            )}
                           </div>
                           <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
                             <span>${position.entry_price.toFixed(2)}</span>
@@ -384,6 +390,29 @@ export function PositionsPanel() {
                                   <X className="h-2.5 w-2.5" />
                                 )}
                               </Button>
+                              {verification?.status === 'QUANTITY_MISMATCH' && verification.exchange_quantity !== undefined && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={async () => {
+                                    try {
+                                      await supabase
+                                        .from('positions')
+                                        .update({ quantity: verification.exchange_quantity, updated_at: new Date().toISOString() })
+                                        .eq('id', position.id);
+                                      toast.success(`Synced ${position.symbol} quantity to ${verification.exchange_quantity?.toFixed(4)}`);
+                                      await verifyPositions();
+                                    } catch {
+                                      toast.error('Failed to sync quantity');
+                                    }
+                                  }}
+                                  className="h-5 px-1 text-[9px] gap-0.5"
+                                  title={`Update DB quantity to ${verification.exchange_quantity}`}
+                                >
+                                  <ArrowRightLeft className="h-2.5 w-2.5" />
+                                  Sync
+                                </Button>
+                              )}
                               {!canClose && (
                                 <span className="text-[8px] text-muted-foreground whitespace-nowrap">
                                   +${(position.profit_target - position.unrealized_pnl).toFixed(2)}
