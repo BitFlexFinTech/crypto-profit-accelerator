@@ -88,15 +88,41 @@ function formatSymbol(symbol: string, exchange: string, tradeType: "spot" | "fut
   }
 }
 
-// Format quantity to proper precision
+// LOT_SIZE stepSize precision for common trading pairs
+const QUANTITY_PRECISION: Record<string, number> = {
+  // High-value coins - more decimals
+  'BTC': 5,    // stepSize: 0.00001
+  'ETH': 4,    // stepSize: 0.0001
+  // Mid-value coins
+  'SOL': 3,    // stepSize: 0.001
+  'BNB': 3,    // stepSize: 0.001
+  'AVAX': 2,   // stepSize: 0.01
+  'LINK': 2,   // stepSize: 0.01
+  // Low-value coins - fewer decimals (integers only)
+  'XRP': 1,    // stepSize: 0.1
+  'ADA': 0,    // stepSize: 1
+  'DOGE': 0,   // stepSize: 1
+  'SHIB': 0,   // stepSize: 1
+  'BONK': 0,   // stepSize: 1
+  'PEPE': 0,   // stepSize: 1
+  'FLOKI': 0,  // stepSize: 1
+};
+
+// Format quantity to proper precision for exchange LOT_SIZE filter
 function formatQuantity(quantity: number, symbol: string): string {
-  if (symbol.includes("BTC")) {
-    return quantity.toFixed(5);
-  } else if (symbol.includes("ETH")) {
-    return quantity.toFixed(4);
-  } else {
-    return quantity.toFixed(2);
-  }
+  // Extract base asset from symbol (e.g., "BTC" from "BTC/USDT" or "BTCUSDT")
+  const baseAsset = symbol.replace(/[-\/]?(USDT|USDC|BUSD|USD).*$/i, '').toUpperCase();
+  
+  // Get precision from mapping, default to 2 decimals for unknown assets
+  const precision = QUANTITY_PRECISION[baseAsset] ?? 2;
+  
+  // Round DOWN to avoid exceeding available balance
+  const multiplier = Math.pow(10, precision);
+  const roundedQty = Math.floor(quantity * multiplier) / multiplier;
+  
+  console.log(`[formatQuantity] ${symbol} -> ${baseAsset}: ${quantity} -> ${roundedQty} (precision: ${precision})`);
+  
+  return roundedQty.toFixed(precision);
 }
 
 // Format price to proper precision
