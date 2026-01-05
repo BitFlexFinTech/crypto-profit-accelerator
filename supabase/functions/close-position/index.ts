@@ -501,6 +501,160 @@ async function placeBybitMarketOrder(
 }
 
 // ============================================
+// BINANCE - CHECK ORDER STATUS (DIRECT QUERY)
+// ============================================
+async function checkBinanceOrderStatus(
+  credentials: ExchangeCredentials,
+  symbol: string,
+  orderId: string,
+  tradeType: "spot" | "futures"
+): Promise<{ filled: boolean; avgPrice: number; status: string; error?: string }> {
+  try {
+    const timestamp = Date.now();
+    const formattedSymbol = formatSymbol(symbol, "binance", tradeType);
+    
+    const params = new URLSearchParams({
+      symbol: formattedSymbol,
+      orderId: orderId,
+      timestamp: timestamp.toString(),
+    });
+    
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(params.toString())
+      .digest("hex");
+    
+    const baseUrl = tradeType === "futures"
+      ? "https://fapi.binance.com/fapi/v1/order"
+      : "https://api.binance.com/api/v3/order";
+    
+    console.log(`[Binance] Checking order status: ${orderId}`);
+    
+    const response = await fetch(`${baseUrl}?${params}&signature=${signature}`, {
+      method: "GET",
+      headers: { "X-MBX-APIKEY": credentials.apiKey },
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error(`[Binance] Order status check failed:`, data);
+      return { filled: false, avgPrice: 0, status: "UNKNOWN", error: data.msg };
+    }
+    
+    const status = data.status;
+    const avgPrice = parseFloat(data.avgPrice || data.price || "0");
+    const filled = status === "FILLED";
+    
+    console.log(`[Binance] Order ${orderId}: status=${status}, avgPrice=${avgPrice}`);
+    
+    return { filled, avgPrice, status };
+  } catch (error) {
+    console.error(`[Binance] Order status exception:`, error);
+    return { filled: false, avgPrice: 0, status: "ERROR", error: error instanceof Error ? error.message : "Unknown error" };
+  }
+}
+
+// ============================================
+// OKX - CHECK ORDER STATUS (DIRECT QUERY)
+// ============================================
+async function checkOKXOrderStatus(
+  credentials: ExchangeCredentials,
+  symbol: string,
+  orderId: string,
+  tradeType: "spot" | "futures"
+): Promise<{ filled: boolean; avgPrice: number; status: string; error?: string }> {
+  try {
+    const timestamp = new Date().toISOString();
+    const formattedSymbol = formatSymbol(symbol, "okx", tradeType);
+    
+    const path = `/api/v5/trade/order?instId=${encodeURIComponent(formattedSymbol)}&ordId=${orderId}`;
+    const preHash = timestamp + "GET" + path;
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(preHash)
+      .digest("base64");
+    
+    console.log(`[OKX] Checking order status: ${orderId}`);
+    
+    const response = await fetch(`https://www.okx.com${path}`, {
+      method: "GET",
+      headers: {
+        "OK-ACCESS-KEY": credentials.apiKey,
+        "OK-ACCESS-SIGN": signature,
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": credentials.passphrase || "",
+      },
+    });
+    
+    const data = await response.json();
+    
+    if (data.code !== "0" || !data.data?.[0]) {
+      console.error(`[OKX] Order status check failed:`, data);
+      return { filled: false, avgPrice: 0, status: "UNKNOWN", error: data.msg };
+    }
+    
+    const orderData = data.data[0];
+    const state = orderData.state; // "filled", "canceled", "live", "partially_filled"
+    const avgPrice = parseFloat(orderData.avgPx || orderData.px || "0");
+    const filled = state === "filled";
+    
+    console.log(`[OKX] Order ${orderId}: state=${state}, avgPx=${avgPrice}`);
+    
+    return { filled, avgPrice, status: state };
+  } catch (error) {
+    console.error(`[OKX] Order status exception:`, error);
+    return { filled: false, avgPrice: 0, status: "ERROR", error: error instanceof Error ? error.message : "Unknown error" };
+  }
+}
+
+// ============================================
+// CHECK TP ORDER STATUS (UNIFIED)
+// ============================================
+async function checkTPOrderStatus(
+  exchange: { 
+    exchange: string; 
+    api_key_encrypted: string | null; 
+    api_secret_encrypted: string | null;
+    passphrase_encrypted: string | null;
+  },
+  position: {
+    symbol: string;
+    take_profit_order_id: string | null;
+    trade_type: string;
+    is_paper_trade: boolean | null;
+  }
+): Promise<{ filled: boolean; avgPrice: number; status: string; error?: string }> {
+  if (!position.take_profit_order_id) {
+    return { filled: false, avgPrice: 0, status: "NO_ORDER" };
+  }
+  
+  if (position.is_paper_trade || position.take_profit_order_id.startsWith("TP-PAPER-")) {
+    return { filled: false, avgPrice: 0, status: "PAPER" };
+  }
+  
+  if (!exchange.api_key_encrypted || !exchange.api_secret_encrypted) {
+    return { filled: false, avgPrice: 0, status: "NO_CREDENTIALS" };
+  }
+  
+  const credentials: ExchangeCredentials = {
+    exchange: exchange.exchange,
+    apiKey: exchange.api_key_encrypted,
+    apiSecret: exchange.api_secret_encrypted,
+    passphrase: exchange.passphrase_encrypted || undefined,
+  };
+  
+  const tradeType = position.trade_type as "spot" | "futures";
+  
+  switch (exchange.exchange) {
+    case "binance":
+      return await checkBinanceOrderStatus(credentials, position.symbol, position.take_profit_order_id, tradeType);
+    case "okx":
+      return await checkOKXOrderStatus(credentials, position.symbol, position.take_profit_order_id, tradeType);
+    default:
+      return { filled: false, avgPrice: 0, status: "UNSUPPORTED_EXCHANGE" };
+  }
+}
+
+// ============================================
 // UNIFIED CANCEL ORDER
 // ============================================
 async function cancelExchangeOrder(
@@ -717,11 +871,155 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { positionId, exitPrice: requestedExitPrice, requireProfit = false } = await req.json();
+    const { positionId, exitPrice: requestedExitPrice, requireProfit = false, checkTpOnly = false } = await req.json();
     
     console.log("=== CLOSE POSITION REQUEST ===");
     console.log("Position ID:", positionId);
     console.log("Require Profit:", requireProfit);
+    console.log("Check TP Only:", checkTpOnly);
+
+    // For checkTpOnly, we just need to check TP status without claiming the position
+    if (checkTpOnly) {
+      console.log("=== CHECK TP ONLY MODE ===");
+      
+      const { data: position } = await supabase
+        .from("positions")
+        .select("*")
+        .eq("id", positionId)
+        .eq("status", "open")
+        .single();
+      
+      if (!position) {
+        return new Response(JSON.stringify({
+          success: true,
+          closed: false,
+          message: "Position not found or not open",
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      
+      if (!position.take_profit_order_id) {
+        return new Response(JSON.stringify({
+          success: true,
+          closed: false,
+          message: "No TP order to check",
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      
+      // Get exchange info
+      const { data: exchange } = await supabase
+        .from("exchanges")
+        .select("*")
+        .eq("id", position.exchange_id)
+        .single();
+      
+      if (!exchange) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Exchange not found",
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      
+      // Check TP order status directly on exchange
+      const tpStatus = await checkTPOrderStatus(exchange, position);
+      
+      console.log(`TP Order Status: ${tpStatus.status}, Filled: ${tpStatus.filled}, AvgPrice: ${tpStatus.avgPrice}`);
+      
+      if (tpStatus.filled && tpStatus.avgPrice > 0) {
+        console.log("=== TP ORDER FILLED - CLOSING POSITION ===");
+        
+        const now = new Date().toISOString();
+        const tradeType = position.trade_type as "spot" | "futures";
+        const actualExitPrice = tpStatus.avgPrice;
+        
+        // Calculate P&L with actual fill price
+        const feeRate = tradeType === "spot" ? 0.001 : 0.0005;
+        const entryFee = position.order_size_usd * feeRate;
+        const exitFee = position.order_size_usd * feeRate;
+        const fundingFee = tradeType === "futures" ? position.order_size_usd * 0.0001 : 0;
+        
+        let grossProfit: number;
+        if (position.direction === "long") {
+          grossProfit = (actualExitPrice - position.entry_price) * position.quantity * (position.leverage || 1);
+        } else {
+          grossProfit = (position.entry_price - actualExitPrice) * position.quantity * (position.leverage || 1);
+        }
+        
+        const netProfit = grossProfit - entryFee - exitFee - fundingFee;
+        
+        console.log(`TP Fill P&L: Exit=${actualExitPrice}, Gross=${grossProfit.toFixed(4)}, Net=${netProfit.toFixed(4)}`);
+        
+        // Update trade record
+        await supabase
+          .from("trades")
+          .update({
+            exit_price: actualExitPrice,
+            exit_fee: exitFee,
+            exit_order_id: position.take_profit_order_id,
+            funding_fee: fundingFee,
+            gross_profit: grossProfit,
+            net_profit: netProfit,
+            status: "closed",
+            closed_at: now,
+            tp_filled_at: now,
+          })
+          .eq("id", position.trade_id);
+        
+        // Update position record
+        await supabase
+          .from("positions")
+          .update({
+            current_price: actualExitPrice,
+            exit_order_id: position.take_profit_order_id,
+            unrealized_pnl: netProfit,
+            status: "closed",
+            take_profit_status: "filled",
+            take_profit_filled_at: now,
+            updated_at: now,
+            reconciliation_note: `TP order filled on exchange @ ${actualExitPrice} - detected via direct order query`,
+          })
+          .eq("id", positionId);
+        
+        // Create notification
+        await supabase
+          .from("notifications")
+          .insert({
+            user_id: position.user_id,
+            type: "profit_target_hit",
+            title: `🎯 ${position.symbol} TP Filled!`,
+            message: `Take Profit hit @ $${actualExitPrice.toFixed(4)}. Net Profit: +$${netProfit.toFixed(2)}`,
+            trade_id: position.trade_id,
+          });
+        
+        return new Response(JSON.stringify({
+          success: true,
+          closed: true,
+          tpFilled: true,
+          exitPrice: actualExitPrice,
+          netProfit,
+          grossProfit,
+          message: "TP order filled - position closed",
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      
+      // TP not filled yet
+      return new Response(JSON.stringify({
+        success: true,
+        closed: false,
+        tpStatus: tpStatus.status,
+        message: `TP order status: ${tpStatus.status}`,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Atomically update position to 'closing' to prevent race conditions
     // Use intermediate status - only set 'closed' AFTER successful exit order
