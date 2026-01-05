@@ -105,6 +105,7 @@ interface TradingContextType {
   testTradeTopSignal: () => Promise<void>;
   clearExecutionLogs: () => void;
   appendExecutionLog: (entry: Omit<ExecutionLogEntry, 'timestamp'>) => void;
+  reconcilePositions: (autoFix?: boolean) => Promise<unknown>;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -1687,6 +1688,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     testTradeTopSignal,
     clearExecutionLogs,
     appendExecutionLog,
+    reconcilePositions: async (autoFix = false) => {
+      const { data, error } = await supabase.functions.invoke('reconcile-positions', {
+        body: { autoFix },
+      });
+      if (error) throw error;
+      if (autoFix && data?.summary?.fixed > 0) {
+        await fetchAllData();
+      }
+      return data;
+    },
   };
 
   return (
