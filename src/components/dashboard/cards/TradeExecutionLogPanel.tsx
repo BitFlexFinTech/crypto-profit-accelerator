@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { useTrading } from '@/contexts/TradingContext';
-import { FileText, Trash2, Copy, Filter, CheckCircle2, XCircle, Clock, Zap, AlertTriangle, ShieldAlert, Settings } from 'lucide-react';
+import { FileText, Trash2, Copy, Filter, CheckCircle2, XCircle, Clock, Zap, AlertTriangle, ShieldAlert, Settings, Info } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -53,10 +53,12 @@ export function TradeExecutionLogPanel() {
     switch (type) {
       case 'TRADE_SUCCESS': return <CheckCircle2 className="h-3 w-3 text-primary" />;
       case 'TRADE_FAILED': return <XCircle className="h-3 w-3 text-destructive" />;
+      case 'ERROR': return <XCircle className="h-3 w-3 text-destructive" />;
       case 'API_PERMISSION_ERROR': return <ShieldAlert className="h-3 w-3 text-warning" />;
       case 'TRADE_REQUESTED': return <Zap className="h-3 w-3 text-accent" />;
       case 'BLOCKED': return <AlertTriangle className="h-3 w-3 text-warning" />;
       case 'LOOP_TICK': return <Clock className="h-3 w-3 text-muted-foreground" />;
+      case 'INFO': return <Info className="h-3 w-3 text-blue-400" />;
       default: return <FileText className="h-3 w-3 text-muted-foreground" />;
     }
   };
@@ -68,8 +70,10 @@ export function TradeExecutionLogPanel() {
     switch (type) {
       case 'TRADE_SUCCESS': return 'bg-primary/10 border-primary/30';
       case 'TRADE_FAILED': return 'bg-destructive/10 border-destructive/30';
+      case 'ERROR': return 'bg-destructive/10 border-destructive/30';
       case 'TRADE_REQUESTED': return 'bg-accent/10 border-accent/30';
       case 'BLOCKED': return 'bg-warning/10 border-warning/30';
+      case 'INFO': return 'bg-blue-500/10 border-blue-500/30';
       default: return 'bg-muted/30 border-muted';
     }
   };

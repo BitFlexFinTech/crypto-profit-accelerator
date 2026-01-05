@@ -55,7 +55,7 @@ interface MarketData {
 
 export interface ExecutionLogEntry {
   timestamp: Date;
-  type: 'LOOP_TICK' | 'SIGNALS_RECEIVED' | 'BLOCKED' | 'TRADE_REQUESTED' | 'TRADE_SUCCESS' | 'TRADE_FAILED' | 'WATCHDOG' | 'API_PERMISSION_ERROR';
+  type: 'LOOP_TICK' | 'SIGNALS_RECEIVED' | 'BLOCKED' | 'TRADE_REQUESTED' | 'TRADE_SUCCESS' | 'TRADE_FAILED' | 'WATCHDOG' | 'API_PERMISSION_ERROR' | 'INFO' | 'ERROR';
   message: string;
   symbol?: string;
   details?: string;
@@ -104,6 +104,7 @@ interface TradingContextType {
   syncBalances: () => Promise<void>;
   testTradeTopSignal: () => Promise<void>;
   clearExecutionLogs: () => void;
+  appendExecutionLog: (entry: Omit<ExecutionLogEntry, 'timestamp'>) => void;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -1685,6 +1686,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     syncBalances,
     testTradeTopSignal,
     clearExecutionLogs,
+    appendExecutionLog,
   };
 
   return (
