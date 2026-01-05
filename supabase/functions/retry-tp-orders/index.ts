@@ -59,7 +59,28 @@ function formatQuantity(quantity: number, symbol: string, exchange?: string, tra
   return roundedQty.toFixed(precision);
 }
 
-function formatPrice(price: number): string {
+// TICK_SIZE for Binance price precision (exchange-specific requirements)
+const TICK_SIZE: Record<string, number> = {
+  'BTC': 0.01, 'ETH': 0.01, 'BNB': 0.01, 'SOL': 0.01,
+  'LINK': 0.01, 'DOT': 0.001, 'AVAX': 0.01, 'DOGE': 0.00001,
+  'ADA': 0.0001, 'XRP': 0.0001, 'MATIC': 0.0001, 'SHIB': 0.00000001,
+  'LTC': 0.01, 'ATOM': 0.01, 'NEAR': 0.001, 'UNI': 0.01,
+  'OP': 0.001, 'ARB': 0.0001, 'TRX': 0.00001,
+};
+
+function formatPrice(price: number, symbol?: string): string {
+  if (symbol) {
+    const baseAsset = symbol.replace(/[-\/]?(USDT|USDC|BUSD|USD).*$/i, '').toUpperCase();
+    const tickSize = TICK_SIZE[baseAsset];
+    if (tickSize) {
+      // Round to tick size
+      const rounded = Math.round(price / tickSize) * tickSize;
+      // Determine decimal places from tick size
+      const decimals = tickSize < 1 ? Math.abs(Math.floor(Math.log10(tickSize))) : 2;
+      return rounded.toFixed(decimals);
+    }
+  }
+  // Default behavior for unknown symbols
   if (price > 1000) return price.toFixed(2);
   if (price > 1) return price.toFixed(4);
   return price.toFixed(6);
@@ -86,7 +107,7 @@ async function placeBinanceLimitTP(
       type: "LIMIT",
       timeInForce: "GTC",
       quantity: formatQuantity(quantity, symbol),
-      price: formatPrice(price),
+      price: formatPrice(price, symbol),
       timestamp: timestamp.toString(),
     });
     
@@ -140,7 +161,7 @@ async function placeOKXLimitTP(
       side: side.toLowerCase(),
       ordType: "limit",
       sz: formatQuantity(quantity, symbol, "okx", tradeType),
-      px: formatPrice(price),
+      px: formatPrice(price, symbol),
     });
     
     const preHash = timestamp + "POST" + "/api/v5/trade/order" + body;

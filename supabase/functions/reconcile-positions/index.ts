@@ -500,7 +500,21 @@ serve(async (req) => {
             }
 
             fixed++;
-            console.log(`[Reconcile] Fixed position ${mismatch.position_id}`);
+            console.log(`[Reconcile] Fixed MISSING position ${mismatch.position_id}`);
+          }
+        } else if (mismatch.type === "QUANTITY_MISMATCH") {
+          // Auto-update DB quantity to match exchange
+          const { error: updateError } = await supabase
+            .from("positions")
+            .update({
+              quantity: mismatch.exchange_balance,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", mismatch.position_id);
+
+          if (!updateError) {
+            fixed++;
+            console.log(`[Reconcile] Synced quantity for ${mismatch.symbol}: ${mismatch.db_quantity} -> ${mismatch.exchange_balance}`);
           }
         }
       }
