@@ -63,6 +63,12 @@ export interface ExecutionLogEntry {
   suggestion?: string;
 }
 
+interface PositionVerification {
+  position_id: string;
+  status: "VERIFIED" | "MISSING" | "QUANTITY_MISMATCH" | "UNVERIFIED";
+  exchange_quantity?: number;
+}
+
 interface TradingContextType {
   // Data
   prices: Record<string, number>;
@@ -74,6 +80,7 @@ interface TradingContextType {
   trades: Trade[];
   marketData: Record<string, MarketData>;
   executionLogs: ExecutionLogEntry[];
+  positionVerifications: Record<string, PositionVerification>;
   
   // Connection states
   connectionStates: Record<string, ConnectionState>;
@@ -83,6 +90,7 @@ interface TradingContextType {
   engineMetrics: EngineMetrics;
   isEngineRunning: boolean;
   isScanning: boolean;
+  isVerifying: boolean;
   
   // Loading states
   loading: boolean;
@@ -106,6 +114,7 @@ interface TradingContextType {
   clearExecutionLogs: () => void;
   appendExecutionLog: (entry: Omit<ExecutionLogEntry, 'timestamp'>) => void;
   reconcilePositions: (autoFix?: boolean) => Promise<unknown>;
+  verifyPositions: (autoClean?: boolean) => Promise<unknown>;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -157,6 +166,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [marketData, setMarketData] = useState<Record<string, MarketData>>({});
   const [executionLogs, setExecutionLogs] = useState<ExecutionLogEntry[]>([]);
+  const [positionVerifications, setPositionVerifications] = useState<Record<string, PositionVerification>>({});
   
   // Connection states
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionState>>({});
@@ -173,6 +183,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   });
   const [isEngineRunning, setIsEngineRunning] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [loading, setLoading] = useState(true);
   // Track last realtime update for sync status display
   const [lastRealtimeUpdate, setLastRealtimeUpdate] = useState<number>(Date.now());
@@ -1713,11 +1724,13 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     trades,
     marketData,
     executionLogs,
+    positionVerifications,
     connectionStates,
     engineStatus,
     engineMetrics,
     isEngineRunning,
     isScanning,
+    isVerifying,
     loading,
     lastRealtimeUpdate,
     slowPairBlacklist,
@@ -1741,6 +1754,36 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         await fetchAllData();
       }
       return data;
+    },
+    verifyPositions: async (autoClean = false) => {
+      setIsVerifying(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('verify-positions', {
+          body: { autoClean },
+        });
+        if (error) throw error;
+        
+        // Update verification status for each position
+        if (data?.positions) {
+          const verifications: Record<string, PositionVerification> = {};
+          for (const v of data.positions) {
+            verifications[v.position_id] = {
+              position_id: v.position_id,
+              status: v.status,
+              exchange_quantity: v.exchange_quantity,
+            };
+          }
+          setPositionVerifications(verifications);
+        }
+        
+        if (autoClean && data?.summary?.cleaned > 0) {
+          await fetchAllData();
+        }
+        
+        return data;
+      } finally {
+        setIsVerifying(false);
+      }
     },
   };
 

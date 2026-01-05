@@ -132,6 +132,25 @@ serve(async (req) => {
       console.warn("Reconciliation failed:", e);
     }
 
+    // STEP 0.5: RETRY FAILED TP ORDERS
+    console.log("Retrying failed TP orders...");
+    try {
+      const retryResponse = await fetch(`${supabaseUrl}/functions/v1/retry-tp-orders`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${supabaseKey}`,
+          "Content-Type": "application/json",
+        },
+      });
+      
+      const retryResult = await retryResponse.json();
+      if (retryResult.succeeded > 0) {
+        result.actions.push(`Retried ${retryResult.succeeded} failed TP orders`);
+      }
+    } catch (e) {
+      console.warn("TP retry failed:", e);
+    }
+
     // STEP 1: Get bot settings
     const { data: settings, error: settingsError } = await supabase
       .from("bot_settings")

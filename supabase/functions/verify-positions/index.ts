@@ -14,21 +14,22 @@ interface ExchangeCredentials {
   passphrase?: string;
 }
 
-interface Mismatch {
+interface VerificationResult {
   position_id: string;
   symbol: string;
   exchange: string;
-  exchange_id: string;
-  type: "MISSING" | "QUANTITY_MISMATCH";
+  trade_type: "spot" | "futures";
+  direction: "long" | "short";
   db_quantity: number;
-  exchange_balance: number;
-  recommended_action: string;
+  exchange_quantity: number;
+  status: "VERIFIED" | "MISSING" | "QUANTITY_MISMATCH";
+  verified_at: string;
 }
 
 // ============================================
-// BINANCE - FETCH ALL ASSET BALANCES (SPOT)
+// BINANCE SPOT - FETCH ALL ASSET BALANCES
 // ============================================
-async function fetchBinanceBalances(credentials: ExchangeCredentials): Promise<Record<string, number>> {
+async function fetchBinanceSpotBalances(credentials: ExchangeCredentials): Promise<Record<string, number>> {
   try {
     const timestamp = Date.now();
     const params = new URLSearchParams({ timestamp: timestamp.toString() });
@@ -42,7 +43,7 @@ async function fetchBinanceBalances(credentials: ExchangeCredentials): Promise<R
     );
 
     if (!response.ok) {
-      console.error(`[Binance] Account fetch failed:`, await response.text());
+      console.error(`[Binance Spot] Account fetch failed:`, await response.text());
       return {};
     }
 
@@ -56,16 +57,16 @@ async function fetchBinanceBalances(credentials: ExchangeCredentials): Promise<R
       }
     }
 
-    console.log(`[Binance] Found ${Object.keys(balances).length} non-zero balances`);
+    console.log(`[Binance Spot] Found ${Object.keys(balances).length} non-zero balances`);
     return balances;
   } catch (error) {
-    console.error(`[Binance] Balance fetch error:`, error);
+    console.error(`[Binance Spot] Balance fetch error:`, error);
     return {};
   }
 }
 
 // ============================================
-// BINANCE FUTURES - FETCH OPEN POSITIONS
+// BINANCE FUTURES - FETCH ALL OPEN POSITIONS
 // ============================================
 async function fetchBinanceFuturesPositions(credentials: ExchangeCredentials): Promise<Record<string, { amount: number; direction: "long" | "short" }>> {
   try {
@@ -91,6 +92,7 @@ async function fetchBinanceFuturesPositions(credentials: ExchangeCredentials): P
     for (const pos of data) {
       const positionAmt = parseFloat(pos.positionAmt) || 0;
       if (Math.abs(positionAmt) > 0.00000001) {
+        // Convert symbol like BTCUSDT to BTC/USDT
         const symbol = pos.symbol.replace("USDT", "/USDT");
         positions[symbol] = {
           amount: Math.abs(positionAmt),
@@ -108,9 +110,9 @@ async function fetchBinanceFuturesPositions(credentials: ExchangeCredentials): P
 }
 
 // ============================================
-// OKX - FETCH ALL ASSET BALANCES (SPOT)
+// OKX SPOT - FETCH ALL ASSET BALANCES
 // ============================================
-async function fetchOKXBalances(credentials: ExchangeCredentials): Promise<Record<string, number>> {
+async function fetchOKXSpotBalances(credentials: ExchangeCredentials): Promise<Record<string, number>> {
   try {
     const timestamp = new Date().toISOString();
     const preHash = timestamp + "GET" + "/api/v5/account/balance";
@@ -129,7 +131,7 @@ async function fetchOKXBalances(credentials: ExchangeCredentials): Promise<Recor
 
     const data = await response.json();
     if (data.code !== "0") {
-      console.error(`[OKX] Balance fetch failed:`, data);
+      console.error(`[OKX Spot] Balance fetch failed:`, data);
       return {};
     }
 
@@ -141,16 +143,16 @@ async function fetchOKXBalances(credentials: ExchangeCredentials): Promise<Recor
       }
     }
 
-    console.log(`[OKX] Found ${Object.keys(balances).length} non-zero balances`);
+    console.log(`[OKX Spot] Found ${Object.keys(balances).length} non-zero balances`);
     return balances;
   } catch (error) {
-    console.error(`[OKX] Balance fetch error:`, error);
+    console.error(`[OKX Spot] Balance fetch error:`, error);
     return {};
   }
 }
 
 // ============================================
-// OKX FUTURES/SWAP - FETCH OPEN POSITIONS
+// OKX FUTURES/SWAP - FETCH ALL OPEN POSITIONS
 // ============================================
 async function fetchOKXFuturesPositions(credentials: ExchangeCredentials): Promise<Record<string, { amount: number; direction: "long" | "short" }>> {
   try {
@@ -178,14 +180,22 @@ async function fetchOKXFuturesPositions(credentials: ExchangeCredentials): Promi
     const positions: Record<string, { amount: number; direction: "long" | "short" }> = {};
     
     for (const pos of data.data || []) {
+      // OKX returns pos (number of contracts) and posSide (long/short/net)
       const posAmt = parseFloat(pos.pos) || 0;
       if (Math.abs(posAmt) > 0) {
+        // Convert instId like BTC-USDT-SWAP to BTC/USDT
         const symbol = pos.instId.replace("-SWAP", "").replace("-", "/");
+        
+        // Determine direction from posSide or sign of pos
         let direction: "long" | "short" = "long";
         if (pos.posSide === "short" || (pos.posSide === "net" && posAmt < 0)) {
           direction = "short";
         }
-        positions[symbol] = { amount: Math.abs(posAmt), direction };
+        
+        positions[symbol] = {
+          amount: Math.abs(posAmt), // This is contracts for OKX
+          direction,
+        };
       }
     }
 
@@ -197,17 +207,10 @@ async function fetchOKXFuturesPositions(credentials: ExchangeCredentials): Promi
   }
 }
 
-// OKX SWAP contract sizes for converting contracts to quantity
-const OKX_CONTRACT_SIZE: Record<string, number> = {
-  'BTC': 0.01, 'ETH': 0.1, 'SOL': 1, 'DOT': 10, 'XRP': 100,
-  'DOGE': 1000, 'ADA': 100, 'LINK': 1, 'AVAX': 1, 'MATIC': 100,
-  'LTC': 0.1, 'BNB': 0.1, 'ATOM': 1, 'NEAR': 10, 'UNI': 1,
-};
-
 // ============================================
-// BYBIT - FETCH ALL ASSET BALANCES
+// BYBIT SPOT - FETCH ALL ASSET BALANCES
 // ============================================
-async function fetchBybitBalances(credentials: ExchangeCredentials): Promise<Record<string, number>> {
+async function fetchBybitSpotBalances(credentials: ExchangeCredentials): Promise<Record<string, number>> {
   try {
     const timestamp = Date.now().toString();
     const recvWindow = "5000";
@@ -231,7 +234,7 @@ async function fetchBybitBalances(credentials: ExchangeCredentials): Promise<Rec
 
     const data = await response.json();
     if (data.retCode !== 0) {
-      console.error(`[Bybit] Balance fetch failed:`, data);
+      console.error(`[Bybit Spot] Balance fetch failed:`, data);
       return {};
     }
 
@@ -243,13 +246,21 @@ async function fetchBybitBalances(credentials: ExchangeCredentials): Promise<Rec
       }
     }
 
-    console.log(`[Bybit] Found ${Object.keys(balances).length} non-zero balances`);
+    console.log(`[Bybit Spot] Found ${Object.keys(balances).length} non-zero balances`);
     return balances;
   } catch (error) {
-    console.error(`[Bybit] Balance fetch error:`, error);
+    console.error(`[Bybit Spot] Balance fetch error:`, error);
     return {};
   }
 }
+
+// OKX SWAP contract sizes for converting contracts to quantity
+const OKX_CONTRACT_SIZE: Record<string, number> = {
+  'BTC': 0.01, 'ETH': 0.1, 'SOL': 1, 'DOT': 10, 'XRP': 100,
+  'DOGE': 1000, 'ADA': 100, 'LINK': 1, 'AVAX': 1, 'MATIC': 100,
+  'LTC': 0.1, 'BNB': 0.1, 'ATOM': 1, 'NEAR': 10, 'UNI': 1,
+  'OP': 10, 'ARB': 10, 'SUI': 10, 'SEI': 100,
+};
 
 // ============================================
 // MAIN HANDLER
@@ -260,52 +271,36 @@ serve(async (req) => {
   }
 
   try {
-    const { autoFix = false } = await req.json().catch(() => ({}));
+    const { autoClean = false } = await req.json().catch(() => ({}));
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch all open positions
-    const { data: positions, error: posError } = await supabase
+    // Fetch all open positions from DB
+    const { data: dbPositions, error: posError } = await supabase
       .from("positions")
       .select("*, exchanges(*)")
       .eq("status", "open");
 
     if (posError) throw posError;
 
-    console.log(`[Reconcile] Found ${positions?.length || 0} open positions`);
+    console.log(`[Verify] Found ${dbPositions?.length || 0} open positions in DB`);
 
-    // Detect orphaned positions: marked closed but no exit_order_id (never sold)
-    const { data: orphanedTrades } = await supabase
-      .from("trades")
-      .select("id, symbol, status, exit_order_id")
-      .eq("status", "closed")
-      .is("exit_order_id", null)
-      .eq("is_paper_trade", false);
-    
-    if (orphanedTrades && orphanedTrades.length > 0) {
-      console.warn(`[Reconcile] ⚠️ ORPHAN ALERT: ${orphanedTrades.length} trades marked closed but never sold!`);
-      for (const orphan of orphanedTrades) {
-        console.warn(`[Reconcile] Orphaned: ${orphan.symbol} (trade: ${orphan.id})`);
-      }
-    }
-
-    if (!positions || positions.length === 0) {
+    if (!dbPositions || dbPositions.length === 0) {
       return new Response(
         JSON.stringify({
           success: true,
-          summary: { total_positions: 0, matched: 0, mismatched: 0, fixed: 0, orphaned: orphanedTrades?.length || 0 },
-          mismatches: [],
-          orphanedTrades: orphanedTrades || [],
+          positions: [],
+          summary: { total: 0, verified: 0, missing: 0, mismatch: 0 },
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Group positions by exchange
-    const exchangePositions = new Map<string, typeof positions>();
-    for (const pos of positions) {
+    // Group positions by exchange for batch verification
+    const exchangePositions = new Map<string, typeof dbPositions>();
+    for (const pos of dbPositions) {
       const exId = pos.exchange_id || "unknown";
       if (!exchangePositions.has(exId)) {
         exchangePositions.set(exId, []);
@@ -313,16 +308,33 @@ serve(async (req) => {
       exchangePositions.get(exId)!.push(pos);
     }
 
-    const mismatches: Mismatch[] = [];
-    let matched = 0;
+    const results: VerificationResult[] = [];
+    let verified = 0;
+    let missing = 0;
+    let mismatch = 0;
 
     // Process each exchange
     for (const [exchangeId, exPositions] of exchangePositions) {
       const exchange = exPositions[0].exchanges;
       if (!exchange || !exchange.api_key_encrypted || !exchange.api_secret_encrypted) {
-        console.log(`[Reconcile] Skipping exchange ${exchangeId} - no credentials`);
-        // Treat paper trades as matched
-        matched += exPositions.filter(p => p.is_paper_trade).length;
+        console.log(`[Verify] Skipping exchange ${exchangeId} - no credentials`);
+        // Paper trades without credentials count as verified
+        for (const pos of exPositions) {
+          if (pos.is_paper_trade) {
+            results.push({
+              position_id: pos.id,
+              symbol: pos.symbol,
+              exchange: exchange?.exchange || "unknown",
+              trade_type: pos.trade_type,
+              direction: pos.direction,
+              db_quantity: Number(pos.quantity),
+              exchange_quantity: Number(pos.quantity),
+              status: "VERIFIED",
+              verified_at: new Date().toISOString(),
+            });
+            verified++;
+          }
+        }
         continue;
       }
 
@@ -333,175 +345,159 @@ serve(async (req) => {
         passphrase: exchange.passphrase_encrypted || undefined,
       };
 
-      // Fetch spot balances AND futures positions for this exchange
+      // Fetch spot balances and futures positions in parallel
       let spotBalances: Record<string, number> = {};
       let futuresPositions: Record<string, { amount: number; direction: "long" | "short" }> = {};
-      
+
       switch (exchange.exchange) {
         case "binance":
           [spotBalances, futuresPositions] = await Promise.all([
-            fetchBinanceBalances(credentials),
+            fetchBinanceSpotBalances(credentials),
             fetchBinanceFuturesPositions(credentials),
           ]);
           break;
         case "okx":
           [spotBalances, futuresPositions] = await Promise.all([
-            fetchOKXBalances(credentials),
+            fetchOKXSpotBalances(credentials),
             fetchOKXFuturesPositions(credentials),
           ]);
           break;
         case "bybit":
-          spotBalances = await fetchBybitBalances(credentials);
+          spotBalances = await fetchBybitSpotBalances(credentials);
+          // Bybit futures would need separate implementation
           break;
         default:
-          console.log(`[Reconcile] Exchange ${exchange.exchange} not supported`);
+          console.log(`[Verify] Exchange ${exchange.exchange} not supported`);
           continue;
       }
 
-      // Compare each position with exchange data
+      // Verify each position
       for (const pos of exPositions) {
         if (pos.is_paper_trade) {
-          matched++;
+          results.push({
+            position_id: pos.id,
+            symbol: pos.symbol,
+            exchange: exchange.exchange,
+            trade_type: pos.trade_type,
+            direction: pos.direction,
+            db_quantity: Number(pos.quantity),
+            exchange_quantity: Number(pos.quantity),
+            status: "VERIFIED",
+            verified_at: new Date().toISOString(),
+          });
+          verified++;
           continue;
         }
 
         const dbQuantity = Number(pos.quantity);
-        const baseAsset = pos.symbol.split("/")[0].toUpperCase();
+        let exchangeQuantity = 0;
+        let posStatus: "VERIFIED" | "MISSING" | "QUANTITY_MISMATCH" = "MISSING";
 
-        // FUTURES POSITIONS: Check against futures positions API
         if (pos.trade_type === "futures" || pos.direction === "short") {
+          // Futures position - check in futures positions map
           const futuresPos = futuresPositions[pos.symbol];
-          
-          if (!futuresPos) {
-            console.log(`[Reconcile] ${pos.symbol} (${pos.trade_type}/${pos.direction}): NOT FOUND in exchange futures`);
-            mismatches.push({
-              position_id: pos.id,
-              symbol: pos.symbol,
-              exchange: exchange.exchange,
-              exchange_id: exchangeId,
-              type: "MISSING",
-              db_quantity: dbQuantity,
-              exchange_balance: 0,
-              recommended_action: "MARK_CLOSED",
-            });
-          } else {
+          if (futuresPos) {
+            // For OKX, convert contracts to quantity
+            if (exchange.exchange === "okx") {
+              const baseAsset = pos.symbol.split("/")[0].toUpperCase();
+              const contractSize = OKX_CONTRACT_SIZE[baseAsset] || 1;
+              exchangeQuantity = futuresPos.amount * contractSize;
+            } else {
+              exchangeQuantity = futuresPos.amount;
+            }
+            
             // Check direction matches
             if (futuresPos.direction !== pos.direction) {
-              console.log(`[Reconcile] ${pos.symbol}: Direction mismatch - DB=${pos.direction}, Exchange=${futuresPos.direction}`);
-              mismatches.push({
-                position_id: pos.id,
-                symbol: pos.symbol,
-                exchange: exchange.exchange,
-                exchange_id: exchangeId,
-                type: "MISSING",
-                db_quantity: dbQuantity,
-                exchange_balance: 0,
-                recommended_action: "MARK_CLOSED",
-              });
+              console.log(`[Verify] ${pos.symbol}: Direction mismatch - DB=${pos.direction}, Exchange=${futuresPos.direction}`);
+              posStatus = "MISSING";
             } else {
-              // Convert OKX contracts to quantity for comparison
-              let exchangeQty = futuresPos.amount;
-              if (exchange.exchange === "okx") {
-                const contractSize = OKX_CONTRACT_SIZE[baseAsset] || 1;
-                exchangeQty = futuresPos.amount * contractSize;
-              }
-              
-              console.log(`[Reconcile] ${pos.symbol} futures: DB=${dbQuantity}, Exchange=${exchangeQty}`);
-              
-              // Allow 20% tolerance for futures
-              if (Math.abs(exchangeQty - dbQuantity) <= dbQuantity * 0.2) {
-                matched++;
+              // Allow 20% tolerance for quantity
+              const tolerance = dbQuantity * 0.2;
+              if (Math.abs(exchangeQuantity - dbQuantity) <= tolerance) {
+                posStatus = "VERIFIED";
               } else {
-                mismatches.push({
-                  position_id: pos.id,
-                  symbol: pos.symbol,
-                  exchange: exchange.exchange,
-                  exchange_id: exchangeId,
-                  type: "QUANTITY_MISMATCH",
-                  db_quantity: dbQuantity,
-                  exchange_balance: exchangeQty,
-                  recommended_action: "UPDATE_QUANTITY",
-                });
+                posStatus = "QUANTITY_MISMATCH";
               }
             }
+          } else {
+            console.log(`[Verify] ${pos.symbol}: Not found in futures positions`);
+            posStatus = "MISSING";
           }
-          continue;
-        }
-
-        // SPOT POSITIONS: Check against spot balance
-        const exchangeBalance = spotBalances[baseAsset] || 0;
-
-        console.log(`[Reconcile] ${pos.symbol} spot: DB=${dbQuantity}, Exchange=${exchangeBalance}`);
-
-        // Check for mismatch (allow 10% tolerance for partial fills)
-        if (exchangeBalance < dbQuantity * 0.1) {
-          // Asset missing or nearly zero
-          mismatches.push({
-            position_id: pos.id,
-            symbol: pos.symbol,
-            exchange: exchange.exchange,
-            exchange_id: exchangeId,
-            type: "MISSING",
-            db_quantity: dbQuantity,
-            exchange_balance: exchangeBalance,
-            recommended_action: "MARK_CLOSED",
-          });
-        } else if (Math.abs(exchangeBalance - dbQuantity) > dbQuantity * 0.1) {
-          // Quantity mismatch
-          mismatches.push({
-            position_id: pos.id,
-            symbol: pos.symbol,
-            exchange: exchange.exchange,
-            exchange_id: exchangeId,
-            type: "QUANTITY_MISMATCH",
-            db_quantity: dbQuantity,
-            exchange_balance: exchangeBalance,
-            recommended_action: "UPDATE_QUANTITY",
-          });
         } else {
-          matched++;
+          // Spot position - check in spot balances
+          const baseAsset = pos.symbol.split("/")[0].toUpperCase();
+          exchangeQuantity = spotBalances[baseAsset] || 0;
+
+          console.log(`[Verify] ${pos.symbol}: DB=${dbQuantity}, Exchange=${exchangeQuantity}`);
+
+          // Allow 20% tolerance
+          if (exchangeQuantity >= dbQuantity * 0.1) {
+            if (Math.abs(exchangeQuantity - dbQuantity) <= dbQuantity * 0.2) {
+              posStatus = "VERIFIED";
+            } else {
+              posStatus = "QUANTITY_MISMATCH";
+            }
+          } else {
+            posStatus = "MISSING";
+          }
         }
+
+        results.push({
+          position_id: pos.id,
+          symbol: pos.symbol,
+          exchange: exchange.exchange,
+          trade_type: pos.trade_type,
+          direction: pos.direction,
+          db_quantity: dbQuantity,
+          exchange_quantity: exchangeQuantity,
+          status: posStatus,
+          verified_at: new Date().toISOString(),
+        });
+
+        if (posStatus === "VERIFIED") verified++;
+        else if (posStatus === "MISSING") missing++;
+        else mismatch++;
       }
     }
 
-    let fixed = 0;
+    // Auto-clean phantom positions if requested
+    let cleaned = 0;
+    if (autoClean && missing > 0) {
+      const phantomPositions = results.filter(r => r.status === "MISSING");
+      for (const phantom of phantomPositions) {
+        console.log(`[Verify] Auto-cleaning phantom position: ${phantom.symbol}`);
+        
+        const { error: updateError } = await supabase
+          .from("positions")
+          .update({
+            status: "closed",
+            exit_order_id: "PHANTOM_CLEANED",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", phantom.position_id);
 
-    // Auto-fix if requested
-    if (autoFix && mismatches.length > 0) {
-      for (const mismatch of mismatches) {
-        if (mismatch.type === "MISSING") {
-          // Mark position as closed
-          const { error: updateError } = await supabase
+        if (!updateError) {
+          // Also close linked trade
+          const { data: pos } = await supabase
             .from("positions")
-            .update({
-              status: "closed",
-              exit_order_id: "RECONCILED",
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", mismatch.position_id);
+            .select("trade_id")
+            .eq("id", phantom.position_id)
+            .single();
 
-          if (!updateError) {
-            // Also update the linked trade if exists
-            const { data: pos } = await supabase
-              .from("positions")
-              .select("trade_id")
-              .eq("id", mismatch.position_id)
-              .single();
-
-            if (pos?.trade_id) {
-              await supabase
-                .from("trades")
-                .update({
-                  status: "closed",
-                  exit_order_id: "RECONCILED",
-                  closed_at: new Date().toISOString(),
-                })
-                .eq("id", pos.trade_id);
-            }
-
-            fixed++;
-            console.log(`[Reconcile] Fixed position ${mismatch.position_id}`);
+          if (pos?.trade_id) {
+            await supabase
+              .from("trades")
+              .update({
+                status: "closed",
+                exit_order_id: "PHANTOM_CLEANED",
+                closed_at: new Date().toISOString(),
+                net_profit: 0,
+                gross_profit: 0,
+              })
+              .eq("id", pos.trade_id);
           }
+
+          cleaned++;
         }
       }
     }
@@ -509,20 +505,19 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
+        positions: results,
         summary: {
-          total_positions: positions.length,
-          matched,
-          mismatched: mismatches.length,
-          fixed,
-          orphaned: orphanedTrades?.length || 0,
+          total: results.length,
+          verified,
+          missing,
+          mismatch,
+          cleaned,
         },
-        mismatches,
-        orphanedTrades: orphanedTrades || [],
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error(`[Reconcile] Error:`, error);
+    console.error(`[Verify] Error:`, error);
     return new Response(
       JSON.stringify({
         success: false,
