@@ -1,8 +1,9 @@
 import { useTrading } from '@/contexts/TradingContext';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Brain, Loader2, AlertCircle, Zap, Search, Wifi, Clock } from 'lucide-react';
+import { Activity, Brain, Loader2, AlertCircle, Zap, Search, Wifi, Clock, ShieldAlert, Database } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { wsManager } from '@/services/ExchangeWebSocketManager';
+import { hftCore, HFTState } from '@/services/HFTCore';
 import { useEffect, useState } from 'react';
 
 export function EngineStatus() {
@@ -10,6 +11,7 @@ export function EngineStatus() {
   const [wsLatency, setWsLatency] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
   const [secondsUntilNextRun, setSecondsUntilNextRun] = useState(60);
+  const [hftState, setHftState] = useState<HFTState | null>(null);
 
   // Track WebSocket connection status
   useEffect(() => {
@@ -21,6 +23,14 @@ export function EngineStatus() {
     checkWsStatus();
     const interval = setInterval(checkWsStatus, 2000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Subscribe to HFT state changes
+  useEffect(() => {
+    const unsubscribe = hftCore.onStateChange((state) => {
+      setHftState(state);
+    });
+    return unsubscribe;
   }, []);
 
   // Calculate countdown to next pg_cron execution (runs at :00 of each minute)
@@ -68,6 +78,16 @@ export function EngineStatus() {
     : 0;
 
   const getStatusConfig = () => {
+    // Safe Mode takes priority
+    if (hftState?.isSafeMode) {
+      return {
+        icon: <ShieldAlert className="h-3 w-3 animate-pulse" />,
+        text: 'Safe Mode',
+        className: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+        detail: hftState.safeModeReason || 'High latency detected',
+      };
+    }
+    
     switch (engineStatus) {
       case 'analyzing':
         return {
@@ -121,6 +141,44 @@ export function EngineStatus() {
 
   return (
     <div className="flex items-center gap-2">
+      {/* Safe Mode Indicator */}
+      {hftState?.isSafeMode && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 border animate-pulse cursor-help">
+              <ShieldAlert className="h-3 w-3" />
+              <span className="ml-1">SAFE</span>
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <div className="text-xs space-y-1">
+              <p className="font-medium text-orange-400">Safe Mode Active</p>
+              <p className="text-muted-foreground">{hftState.safeModeReason}</p>
+              <p className="text-muted-foreground text-[10px]">New entries paused, exits allowed</p>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      )}
+
+      {/* DB Write Queue Indicator */}
+      {hftState && hftState.dbWriteQueueSize > 0 && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30 border cursor-help">
+              <Database className="h-3 w-3" />
+              <span className="ml-1">{hftState.dbWriteQueueSize}</span>
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <div className="text-xs space-y-1">
+              <p className="font-medium">DB Write Queue</p>
+              <p className="text-muted-foreground">{hftState.dbWriteQueueSize} pending writes</p>
+              <p className="text-muted-foreground text-[10px]">Async persistence - trades execute first</p>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      )}
+
       {/* WebSocket Status */}
       <Tooltip>
         <TooltipTrigger asChild>
@@ -133,6 +191,7 @@ export function EngineStatus() {
           <div className="text-xs space-y-1">
             <p className="font-medium">{wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected'}</p>
             {wsLatency > 0 && <p className="text-muted-foreground">Latency: {wsLatency}ms</p>}
+            {wsLatency > 200 && <p className="text-orange-400">⚠️ High latency may trigger Safe Mode</p>}
           </div>
         </TooltipContent>
       </Tooltip>
