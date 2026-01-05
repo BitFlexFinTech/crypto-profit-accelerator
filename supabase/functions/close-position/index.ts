@@ -39,14 +39,52 @@ function formatSymbol(symbol: string, exchange: string, tradeType: "spot" | "fut
   }
 }
 
+// LOT_SIZE stepSize precision for common trading pairs
+const QUANTITY_PRECISION: Record<string, number> = {
+  // High-value coins - more decimals
+  'BTC': 5,    // stepSize: 0.00001
+  'ETH': 4,    // stepSize: 0.0001
+  // Mid-value coins
+  'SOL': 3,    // stepSize: 0.001
+  'BNB': 3,    // stepSize: 0.001
+  'LTC': 3,    // stepSize: 0.001
+  'AVAX': 2,   // stepSize: 0.01
+  'LINK': 2,   // stepSize: 0.01
+  'UNI': 2,    // stepSize: 0.01
+  'AAVE': 2,   // stepSize: 0.01
+  'DOT': 1,    // stepSize: 0.1
+  'ATOM': 1,   // stepSize: 0.1
+  'NEAR': 1,   // stepSize: 0.1
+  'OP': 1,     // stepSize: 0.1
+  'ARB': 1,    // stepSize: 0.1
+  'XRP': 1,    // stepSize: 0.1
+  'MATIC': 0,  // stepSize: 1
+  'ADA': 0,    // stepSize: 1
+  'DOGE': 0,   // stepSize: 1
+  'SHIB': 0,   // stepSize: 1
+  'BONK': 0,   // stepSize: 1
+  'PEPE': 0,   // stepSize: 1
+  'FLOKI': 0,  // stepSize: 1
+  'TRX': 0,    // stepSize: 1
+  'SUI': 0,    // stepSize: 1
+  'SEI': 0,    // stepSize: 1
+};
+
+// Format quantity to proper precision for exchange LOT_SIZE filter
 function formatQuantity(quantity: number, symbol: string): string {
-  if (symbol.includes("BTC")) {
-    return quantity.toFixed(5);
-  } else if (symbol.includes("ETH")) {
-    return quantity.toFixed(4);
-  } else {
-    return quantity.toFixed(2);
-  }
+  // Extract base asset from symbol (e.g., "BTC" from "BTC/USDT" or "BTCUSDT")
+  const baseAsset = symbol.replace(/[-\/]?(USDT|USDC|BUSD|USD).*$/i, '').toUpperCase();
+  
+  // Get precision from mapping, default to 2 decimals for unknown assets
+  const precision = QUANTITY_PRECISION[baseAsset] ?? 2;
+  
+  // Round DOWN to avoid exceeding available balance
+  const multiplier = Math.pow(10, precision);
+  const roundedQty = Math.floor(quantity * multiplier) / multiplier;
+  
+  console.log(`[formatQuantity] ${symbol} -> ${baseAsset}: ${quantity} -> ${roundedQty} (precision: ${precision})`);
+  
+  return roundedQty.toFixed(precision);
 }
 
 // ============================================
@@ -608,6 +646,35 @@ serve(async (req) => {
       
       if (!cancelResult.success) {
         console.warn(`Failed to cancel TP order: ${cancelResult.error}`);
+      }
+    }
+
+    // ============================================
+    // STEP 1.5: VERIFY PROFIT TARGET BEFORE EXIT (STRICT RULE)
+    // ============================================
+    if (requireProfit) {
+      const estimatedPnL = position.unrealized_pnl || 0;
+      const profitTarget = position.profit_target || 0;
+      
+      if (estimatedPnL < profitTarget) {
+        console.log("=== PROFIT TARGET NOT MET - BLOCKING CLOSE ===");
+        console.log(`Current PnL: $${estimatedPnL.toFixed(2)}, Required: $${profitTarget.toFixed(2)}`);
+        
+        // Revert position back to open
+        await supabase
+          .from("positions")
+          .update({ status: "open" })
+          .eq("id", positionId);
+        
+        return new Response(JSON.stringify({
+          success: false,
+          error: `Cannot close: Need +$${profitTarget.toFixed(2)}, currently at ${estimatedPnL >= 0 ? '+' : ''}$${estimatedPnL.toFixed(2)}`,
+          profitRequired: profitTarget,
+          currentPnL: estimatedPnL,
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
     }
 
