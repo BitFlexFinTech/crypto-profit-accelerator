@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.retry-tp-orders]
 verify_jwt = false
+
+[functions.price-proxy]
+verify_jwt = false

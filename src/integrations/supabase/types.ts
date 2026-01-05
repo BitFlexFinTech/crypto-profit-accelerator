@@ -259,6 +259,7 @@ export type Database = {
           order_size_usd: number
           profit_target: number
           quantity: number
+          reconciliation_note: string | null
           status: Database["public"]["Enums"]["position_status"] | null
           symbol: string
           take_profit_filled_at: string | null
@@ -287,6 +288,7 @@ export type Database = {
           order_size_usd: number
           profit_target: number
           quantity: number
+          reconciliation_note?: string | null
           status?: Database["public"]["Enums"]["position_status"] | null
           symbol: string
           take_profit_filled_at?: string | null
@@ -315,6 +317,7 @@ export type Database = {
           order_size_usd?: number
           profit_target?: number
           quantity?: number
+          reconciliation_note?: string | null
           status?: Database["public"]["Enums"]["position_status"] | null
           symbol?: string
           take_profit_filled_at?: string | null

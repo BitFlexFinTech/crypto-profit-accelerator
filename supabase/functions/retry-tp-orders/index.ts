@@ -306,21 +306,21 @@ serve(async (req) => {
         console.error(`[TP Retry] Balance check failed for ${position.symbol}:`, e);
       }
 
-      // If balance is < 10% of required, asset was likely sold externally
+      // STRICT RULE: NEVER auto-close positions - only flag as stuck for review
+      // Positions must ONLY close when profit target is hit
       if (availableBalance < quantity * 0.1) {
-        console.log(`[TP Retry] Insufficient balance for ${position.symbol}. Available: ${availableBalance}, Needed: ${quantity}. Auto-closing.`);
+        console.warn(`[TP Retry] STUCK: ${position.symbol} - Insufficient balance (${availableBalance.toFixed(8)}/${quantity.toFixed(8)}). Flagging for review, NOT closing.`);
         
         await supabase
           .from("positions")
           .update({
-            status: "closed",
-            exit_order_id: "EXTERNAL_SALE",
-            take_profit_status: "filled_external",
+            take_profit_status: "stuck",
+            reconciliation_note: `Balance mismatch: Exchange has ${availableBalance.toFixed(8)}, DB expects ${quantity.toFixed(8)}. Needs manual verification.`,
             updated_at: new Date().toISOString(),
           })
           .eq("id", position.id);
         
-        autoClosedInsufficient++;
+        autoClosedInsufficient++; // Rename to flaggedStuck in response
         continue;
       }
 
@@ -392,7 +392,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`=== TP RETRY COMPLETE: ${succeeded}/${retried} succeeded, ${autoClosedInsufficient} auto-closed ===`);
+    console.log(`=== TP RETRY COMPLETE: ${succeeded}/${retried} succeeded, ${autoClosedInsufficient} flagged stuck ===`);
 
     return new Response(
       JSON.stringify({
@@ -400,7 +400,7 @@ serve(async (req) => {
         retried,
         succeeded,
         failed,
-        autoClosedInsufficient,
+        flaggedStuck: autoClosedInsufficient, // Renamed from autoClosedInsufficient
         errors: errors.length > 0 ? errors : undefined,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

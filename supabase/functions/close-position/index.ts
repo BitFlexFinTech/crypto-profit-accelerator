@@ -807,35 +807,29 @@ serve(async (req) => {
       currentPrice
     );
     
-    // Handle case where asset is no longer on exchange (already sold externally)
+    // STRICT RULE: NEVER auto-close positions even if no balance
+    // Positions must ONLY close when profit target is hit
+    // Flag as stuck for manual review instead
     if (exitResult.noBalance) {
-      console.warn("=== NO BALANCE - CLOSING POSITION AS DATA CLEANUP ===");
+      console.warn("=== NO BALANCE - FLAGGING AS STUCK (NOT CLOSING) ===");
       const now = new Date().toISOString();
       
-      // Close position in DB with a note - asset was already sold
+      // Revert to open but flag as stuck - DO NOT CLOSE
       await supabase
         .from("positions")
         .update({ 
-          status: "closed",
-          exit_order_id: "EXTERNAL-CLOSE",
+          status: "open",
+          take_profit_status: "stuck",
+          reconciliation_note: `Cannot close: Asset not found on exchange (${exitResult.error || 'no balance'}). Needs manual verification.`,
           updated_at: now,
         })
         .eq("id", positionId);
       
-      await supabase
-        .from("trades")
-        .update({
-          status: "closed",
-          closed_at: now,
-          exit_order_id: "EXTERNAL-CLOSE",
-          net_profit: 0, // Unknown - closed externally
-          gross_profit: 0,
-        })
-        .eq("id", position.trade_id);
-      
       return new Response(JSON.stringify({
-        success: true,
-        warning: "Position closed in database - asset was already sold on exchange",
+        success: false,
+        blocked: true,
+        stuck: true,
+        message: "Position flagged as STUCK - asset not found on exchange. Manual verification required.",
         noBalance: true,
       }), {
         status: 200,
