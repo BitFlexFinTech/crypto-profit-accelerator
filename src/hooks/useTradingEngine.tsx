@@ -20,9 +20,21 @@ interface TradingSignal {
   tradeType: 'spot' | 'futures';
 }
 
+interface LoopResult {
+  success: boolean;
+  status: string;
+  actions: string[];
+  signalsGenerated: number;
+  tradesExecuted: number;
+  positionsClosed: number;
+  errors: string[];
+  timestamp: string;
+}
+
 interface EngineState {
   isRunning: boolean;
   lastAnalysis: Date | null;
+  lastLoopResult: LoopResult | null;
   currentSignals: TradingSignal[];
   tradesExecuted: number;
   profitToday: number;
@@ -34,12 +46,13 @@ interface EngineState {
 export function useTradingEngine() {
   const { toast } = useToast();
   const { settings } = useBotSettings();
-  const { exchanges, getConnectedExchangeNames } = useExchanges();
-  const { positions, closePosition } = usePositions();
+  const { exchanges } = useExchanges();
+  const { positions, refetch: refetchPositions } = usePositions();
   
   const [engineState, setEngineState] = useState<EngineState>({
     isRunning: false,
     lastAnalysis: null,
+    lastLoopResult: null,
     currentSignals: [],
     tradesExecuted: 0,
     profitToday: 0,
@@ -51,66 +64,118 @@ export function useTradingEngine() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isRunningRef = useRef(false);
 
-  const analyzePairs = useCallback(async () => {
-    if (!settings) return [];
+  // Call the server-side trading loop
+  const runServerLoop = useCallback(async () => {
+    if (!isRunningRef.current || !settings?.is_bot_running) return null;
 
     setEngineState(prev => ({ ...prev, status: 'analyzing' }));
 
     try {
-      const connectedExchanges = getConnectedExchangeNames();
-      if (connectedExchanges.length === 0) {
-        throw new Error('No exchanges connected');
-      }
-
-      const { data, error } = await supabase.functions.invoke('analyze-pairs', {
-        body: {
-          exchanges: connectedExchanges,
-          mode: exchanges.some(e => e.futures_enabled) ? 'both' : 'spot',
-          aggressiveness: settings.ai_aggressiveness || 'balanced',
-        },
+      console.log('[TradingEngine] Calling server-side trading loop...');
+      
+      const { data, error } = await supabase.functions.invoke('run-trading-loop', {
+        body: {},
       });
 
       if (error) throw error;
 
-      const signals = data?.signals || [];
+      const result = data as LoopResult;
+      
       setEngineState(prev => ({
         ...prev,
-        currentSignals: signals,
         lastAnalysis: new Date(),
-        status: 'monitoring',
+        lastLoopResult: result,
+        tradesExecuted: prev.tradesExecuted + (result.tradesExecuted || 0),
+        status: result.success ? 'monitoring' : 'error',
+        lastError: result.errors?.length > 0 ? result.errors.join(', ') : null,
       }));
 
-      return signals;
+      // Refetch positions after loop completes
+      if (result.tradesExecuted > 0 || result.positionsClosed > 0) {
+        refetchPositions();
+        
+        if (result.tradesExecuted > 0) {
+          toast({
+            title: '📈 Trade Executed',
+            description: `${result.tradesExecuted} new trade(s) opened`,
+          });
+        }
+        
+        if (result.positionsClosed > 0) {
+          toast({
+            title: '✅ Position Closed',
+            description: `${result.positionsClosed} position(s) closed at profit target`,
+          });
+        }
+      }
+
+      console.log('[TradingEngine] Loop result:', result);
+      return result;
     } catch (error) {
-      console.error('Error analyzing pairs:', error);
+      console.error('[TradingEngine] Server loop error:', error);
       setEngineState(prev => ({
         ...prev,
         status: 'error',
-        lastError: error instanceof Error ? error.message : 'Analysis failed',
+        lastError: error instanceof Error ? error.message : 'Server loop failed',
       }));
-      return [];
+      return null;
     }
-  }, [settings, exchanges, getConnectedExchangeNames]);
+  }, [settings, refetchPositions, toast]);
 
+  // Start/stop engine based on settings
+  useEffect(() => {
+    if (settings?.is_bot_running && !isRunningRef.current) {
+      console.log('[TradingEngine] Starting engine...');
+      isRunningRef.current = true;
+      setEngineState(prev => ({ ...prev, isRunning: true, status: 'monitoring' }));
+      
+      // Run immediately
+      runServerLoop();
+      
+      // Then run every 30 seconds
+      intervalRef.current = setInterval(runServerLoop, 30000);
+    } else if (!settings?.is_bot_running && isRunningRef.current) {
+      console.log('[TradingEngine] Stopping engine...');
+      isRunningRef.current = false;
+      setEngineState(prev => ({ ...prev, isRunning: false, status: 'idle' }));
+      
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [settings?.is_bot_running, runServerLoop]);
+
+  // Force run the trading loop
+  const forceAnalyze = useCallback(async () => {
+    console.log('[TradingEngine] Force running trading loop...');
+    const result = await runServerLoop();
+    return result;
+  }, [runServerLoop]);
+
+  // Legacy executeTrade for manual signal execution
   const executeTrade = useCallback(async (signal: TradingSignal) => {
     if (!settings) return;
 
     setEngineState(prev => ({ ...prev, status: 'trading' }));
 
     try {
-      // Find the exchange ID
       const exchange = exchanges.find(e => e.exchange === signal.exchange && e.is_connected);
       if (!exchange) {
         throw new Error(`Exchange ${signal.exchange} not found`);
       }
 
-      // Calculate order size within limits
       const orderSize = Math.min(
-        Math.max(settings.min_order_size, 333),
-        settings.max_order_size
+        Math.max(settings.min_order_size || 10, 333),
+        settings.max_order_size || 1000
       );
 
-      // Determine profit target based on trade type
       const profitTarget = signal.tradeType === 'futures' 
         ? settings.futures_profit_target 
         : settings.spot_profit_target;
@@ -144,6 +209,7 @@ export function useTradingEngine() {
         description: `${signal.direction.toUpperCase()} ${signal.symbol} @ $${signal.entryPrice.toFixed(2)}`,
       });
 
+      refetchPositions();
       return data;
     } catch (error) {
       console.error('Error executing trade:', error);
@@ -154,109 +220,7 @@ export function useTradingEngine() {
       }));
       throw error;
     }
-  }, [settings, exchanges, toast]);
-
-  const checkPositionsForProfit = useCallback(async () => {
-    if (!settings || positions.length === 0) return;
-
-    for (const position of positions) {
-      const profitTarget = position.trade_type === 'futures'
-        ? settings.futures_profit_target
-        : settings.spot_profit_target;
-
-      if (position.unrealized_pnl >= profitTarget) {
-        console.log(`Position ${position.symbol} hit profit target, closing...`);
-        await closePosition(position.id);
-        
-        setEngineState(prev => ({
-          ...prev,
-          profitToday: prev.profitToday + position.unrealized_pnl,
-        }));
-      }
-    }
-  }, [settings, positions, closePosition]);
-
-  const runTradingLoop = useCallback(async () => {
-    if (!isRunningRef.current || !settings?.is_bot_running) return;
-
-    try {
-      // Check if we've hit daily loss limit
-      if (engineState.lossToday >= settings.daily_loss_limit) {
-        console.log('Daily loss limit reached, pausing trading');
-        setEngineState(prev => ({ ...prev, status: 'idle', lastError: 'Daily loss limit reached' }));
-        return;
-      }
-
-      // Check if we're at max positions
-      if (positions.length >= settings.max_open_positions) {
-        console.log('Max positions reached, monitoring only');
-        await checkPositionsForProfit();
-        return;
-      }
-
-      // Analyze pairs
-      const signals = await analyzePairs();
-
-      // Check positions for profit targets
-      await checkPositionsForProfit();
-
-      // Execute top signal if conditions are met
-      if (signals.length > 0 && positions.length < settings.max_open_positions) {
-        const topSignal = signals[0];
-        
-        // Only trade if confidence is high enough
-        const confidenceThreshold = settings.ai_aggressiveness === 'aggressive' ? 0.5 :
-                                   settings.ai_aggressiveness === 'conservative' ? 0.8 : 0.65;
-        
-        if (topSignal.confidence >= confidenceThreshold && topSignal.score >= 60) {
-          await executeTrade(topSignal);
-        }
-      }
-
-    } catch (error) {
-      console.error('Trading loop error:', error);
-      setEngineState(prev => ({
-        ...prev,
-        status: 'error',
-        lastError: error instanceof Error ? error.message : 'Unknown error',
-      }));
-    }
-  }, [settings, positions, engineState.lossToday, analyzePairs, checkPositionsForProfit, executeTrade]);
-
-  // Start/stop engine based on settings
-  useEffect(() => {
-    if (settings?.is_bot_running && !isRunningRef.current) {
-      console.log('Starting trading engine...');
-      isRunningRef.current = true;
-      setEngineState(prev => ({ ...prev, isRunning: true, status: 'monitoring' }));
-      
-      // Run immediately
-      runTradingLoop();
-      
-      // Then run every 30 seconds
-      intervalRef.current = setInterval(runTradingLoop, 30000);
-    } else if (!settings?.is_bot_running && isRunningRef.current) {
-      console.log('Stopping trading engine...');
-      isRunningRef.current = false;
-      setEngineState(prev => ({ ...prev, isRunning: false, status: 'idle' }));
-      
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    }
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [settings?.is_bot_running, runTradingLoop]);
-
-  const forceAnalyze = useCallback(async () => {
-    const signals = await analyzePairs();
-    return signals;
-  }, [analyzePairs]);
+  }, [settings, exchanges, toast, refetchPositions]);
 
   return {
     engineState,
