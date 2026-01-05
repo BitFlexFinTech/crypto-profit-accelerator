@@ -85,18 +85,29 @@ export async function fetchOKXPrices(symbols: string[]): Promise<PriceData[]> {
   }
 }
 
+// Track last error log time to prevent console spam
+let lastErrorLogTime = 0;
+const ERROR_LOG_INTERVAL = 60000; // Only log errors once per minute
+
 // Unified price fetcher with fallback
-export async function fetchAllPrices(symbols: string[]): Promise<PriceData[]> {
+export async function fetchAllPrices(symbols: string[], silent = false): Promise<PriceData[]> {
   try {
     // Try Binance first (most reliable for crypto prices)
     return await fetchBinancePrices(symbols);
   } catch (binanceError) {
-    console.warn('Binance API failed, trying OKX fallback:', binanceError);
+    const now = Date.now();
+    if (!silent && now - lastErrorLogTime > ERROR_LOG_INTERVAL) {
+      console.warn('Binance API unavailable (CORS), using OKX fallback');
+      lastErrorLogTime = now;
+    }
     
     try {
       return await fetchOKXPrices(symbols);
     } catch (okxError) {
-      console.error('All price APIs failed:', okxError);
+      if (!silent && now - lastErrorLogTime > ERROR_LOG_INTERVAL) {
+        console.warn('All REST price APIs unavailable, relying on WebSocket');
+        lastErrorLogTime = now;
+      }
       return [];
     }
   }

@@ -138,7 +138,7 @@ const DEFAULT_SYMBOLS = [
 const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_BASE_DELAY = 1000;
-const REST_FALLBACK_INTERVAL = 1500; // Faster fallback polling
+const REST_FALLBACK_INTERVAL = 5000; // Reduced polling frequency to prevent spam
 
 // ⚡ SPEED OPTIMIZED INTERVALS - Target: <3 min trades
 const BACKGROUND_SCAN_INTERVAL = 2000; // 2s - More frequent AI scans

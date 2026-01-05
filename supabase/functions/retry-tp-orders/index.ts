@@ -248,6 +248,7 @@ serve(async (req) => {
     let retried = 0;
     let succeeded = 0;
     let failed = 0;
+    let autoClosedInsufficient = 0;
     const errors: string[] = [];
 
     for (const position of positionsToRetry) {
@@ -264,10 +265,68 @@ serve(async (req) => {
         passphrase: exchange.passphrase_encrypted || undefined,
       };
 
+      const quantity = Number(position.quantity);
+      const baseAsset = position.symbol.split("/")[0].toUpperCase();
+
+      // Pre-check balance before attempting TP order
+      let availableBalance = 0;
+      try {
+        if (exchange.exchange === "binance") {
+          const timestamp = Date.now();
+          const params = new URLSearchParams({ timestamp: timestamp.toString() });
+          const signature = createHmac("sha256", credentials.apiSecret)
+            .update(params.toString())
+            .digest("hex");
+          const res = await fetch(
+            `https://api.binance.com/api/v3/account?${params}&signature=${signature}`,
+            { headers: { "X-MBX-APIKEY": credentials.apiKey } }
+          );
+          const data = await res.json();
+          const balanceEntry = data.balances?.find((b: { asset: string }) => b.asset === baseAsset);
+          availableBalance = parseFloat(balanceEntry?.free || "0");
+        } else if (exchange.exchange === "okx") {
+          const timestamp = new Date().toISOString();
+          const preHash = timestamp + "GET" + "/api/v5/account/balance";
+          const signature = createHmac("sha256", credentials.apiSecret)
+            .update(preHash)
+            .digest("base64");
+          const res = await fetch("https://www.okx.com/api/v5/account/balance", {
+            headers: {
+              "OK-ACCESS-KEY": credentials.apiKey,
+              "OK-ACCESS-SIGN": signature,
+              "OK-ACCESS-TIMESTAMP": timestamp,
+              "OK-ACCESS-PASSPHRASE": credentials.passphrase || "",
+            },
+          });
+          const data = await res.json();
+          const detail = data.data?.[0]?.details?.find((d: { ccy: string }) => d.ccy === baseAsset);
+          availableBalance = parseFloat(detail?.availBal || "0");
+        }
+      } catch (e) {
+        console.error(`[TP Retry] Balance check failed for ${position.symbol}:`, e);
+      }
+
+      // If balance is < 10% of required, asset was likely sold externally
+      if (availableBalance < quantity * 0.1) {
+        console.log(`[TP Retry] Insufficient balance for ${position.symbol}. Available: ${availableBalance}, Needed: ${quantity}. Auto-closing.`);
+        
+        await supabase
+          .from("positions")
+          .update({
+            status: "closed",
+            exit_order_id: "EXTERNAL_SALE",
+            take_profit_status: "filled_external",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", position.id);
+        
+        autoClosedInsufficient++;
+        continue;
+      }
+
       // Calculate TP side based on direction
       const tpSide = position.direction === "long" ? "SELL" : "BUY";
       const tpPrice = Number(position.take_profit_price);
-      const quantity = Number(position.quantity);
 
       console.log(`[TP Retry] ${position.symbol}: Attempting ${tpSide} @ ${tpPrice}`);
       retried++;
@@ -333,7 +392,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`=== TP RETRY COMPLETE: ${succeeded}/${retried} succeeded ===`);
+    console.log(`=== TP RETRY COMPLETE: ${succeeded}/${retried} succeeded, ${autoClosedInsufficient} auto-closed ===`);
 
     return new Response(
       JSON.stringify({
@@ -341,6 +400,7 @@ serve(async (req) => {
         retried,
         succeeded,
         failed,
+        autoClosedInsufficient,
         errors: errors.length > 0 ? errors : undefined,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
