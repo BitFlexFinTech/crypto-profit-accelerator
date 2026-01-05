@@ -479,6 +479,24 @@ export type Database = {
           },
         ]
       }
+      trading_loop_lock: {
+        Row: {
+          id: number
+          locked_at: string | null
+          locked_by: string | null
+        }
+        Insert: {
+          id?: number
+          locked_at?: string | null
+          locked_by?: string | null
+        }
+        Update: {
+          id?: number
+          locked_at?: string | null
+          locked_by?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

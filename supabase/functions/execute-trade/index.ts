@@ -972,8 +972,12 @@ serve(async (req) => {
     
     console.log(`TP order result: ID=${takeProfitOrderId}, Live=${tpResult.isLive}`);
     
+    // CRITICAL FIX: Set proper TP status based on result
+    // If TP placement failed, set status to 'error' not 'pending' to prevent stuck positions
+    const tpStatus = tpResult.error || !takeProfitOrderId ? "error" : "pending";
+    
     if (tpResult.error) {
-      console.warn(`TP Order warning: ${tpResult.error}`);
+      console.error(`TP Order FAILED: ${tpResult.error} - Setting status to 'error' for fallback handling`);
     }
 
     // ============================================
@@ -1000,10 +1004,10 @@ serve(async (req) => {
         entry_order_id: entryOrderId,
         status: "open",
         opened_at: new Date().toISOString(),
-        take_profit_order_id: takeProfitOrderId,
+        take_profit_order_id: takeProfitOrderId || null,
         take_profit_price: takeProfitPrice,
-        take_profit_status: "pending",
-        take_profit_placed_at: new Date().toISOString(),
+        take_profit_status: tpStatus,
+        take_profit_placed_at: takeProfitOrderId ? new Date().toISOString() : null,
       })
       .select()
       .single();
