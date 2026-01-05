@@ -709,6 +709,8 @@ serve(async (req) => {
     // ============================================
     // STEP 1: CANCEL PENDING TP ORDER
     // ============================================
+    let tpAlreadyFilled = false;
+    
     if (position.take_profit_order_id && position.take_profit_status === "pending") {
       console.log("=== STEP 1: CANCELLING TP ORDER ===");
       console.log("TP Order ID:", position.take_profit_order_id);
@@ -723,6 +725,16 @@ serve(async (req) => {
       
       if (!cancelResult.success) {
         console.warn(`Failed to cancel TP order: ${cancelResult.error}`);
+        
+        // Check if TP order was already filled on exchange
+        if (cancelResult.error?.includes("filled") || cancelResult.error?.includes("All operations failed")) {
+          console.log("=== TP ORDER MAY HAVE ALREADY FILLED ===");
+          tpAlreadyFilled = true;
+          // Use TP price as exit price if available
+          if (position.take_profit_price) {
+            console.log(`Using TP price as exit price: ${position.take_profit_price}`);
+          }
+        }
       }
     }
 
