@@ -816,6 +816,17 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
     // ⚡ HFT PRE-TRADE RISK CHECK
     // Validates safe mode, fat-finger protection, balance, position count, daily loss
+    
+    // Calculate current daily loss from closed trades today
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayNetProfit = (await supabase
+      .from('daily_stats')
+      .select('net_profit')
+      .gte('date', todayStart.toISOString().split('T')[0])
+      .maybeSingle())?.data?.net_profit ?? 0;
+    const currentDailyLoss = todayNetProfit < 0 ? Math.abs(Number(todayNetProfit)) : 0;
+    
     const riskCheck = hftCore.preTradeRiskCheck({
       exchange: signal.exchange as 'binance' | 'okx' | 'bybit' | 'kucoin' | 'hyperliquid',
       symbol: signal.symbol,
@@ -828,7 +839,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       minOrderSize: currentSettings.min_order_size,
       maxOrderSize: currentSettings.max_order_size,
       dailyLossLimit: currentSettings.daily_loss_limit || 100,
-      currentDailyLoss: 0, // TODO: Calculate from daily_stats
+      currentDailyLoss,
     });
     
     if (!riskCheck.allowed) {

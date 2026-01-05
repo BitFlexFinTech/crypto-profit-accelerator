@@ -53,6 +53,9 @@ class ExchangeWebSocketManager {
   private latestPrices: Map<string, PriceUpdate> = new Map();
   private subscribedSymbols: Set<string> = new Set(TOP_PAIRS);
   private isInitialized = false;
+  
+  // RTT tracking for real latency measurement
+  private lastPingSentAt: Map<ExchangeName, number> = new Map();
 
   private constructor() {
     // Initialize connection states
@@ -180,14 +183,15 @@ class ExchangeWebSocketManager {
       const connectTime = Date.now();
       
       ws.onopen = () => {
-        const latency = Date.now() - connectTime;
-        console.log(`✅ Binance WebSocket connected (${latency}ms)`);
+        console.log(`✅ Binance WebSocket connected`);
+        // Don't use handshake time as RTT - set to 0 (neutral)
+        // Binance doesn't support app-level ping/pong, so we rely on message activity
         this.updateConnectionState(exchange, {
           connected: true,
           status: 'connected',
           lastPing: Date.now(),
           reconnectAttempts: 0,
-          latency,
+          latency: 0, // Neutral - no RTT measurement for Binance
         });
         this.startPingInterval(exchange, ws);
       };
@@ -245,8 +249,7 @@ class ExchangeWebSocketManager {
       const connectTime = Date.now();
       
       ws.onopen = () => {
-        const latency = Date.now() - connectTime;
-        console.log(`✅ OKX WebSocket connected (${latency}ms)`);
+        console.log(`✅ OKX WebSocket connected`);
         
         // Subscribe to tickers
         const symbols = Array.from(this.subscribedSymbols);
@@ -255,18 +258,29 @@ class ExchangeWebSocketManager {
           args: symbols.map(s => ({ channel: 'tickers', instId: s.replace('/', '-') })),
         }));
         
+        // Don't use handshake time as RTT - set to 0 (neutral) until real ping/pong
         this.updateConnectionState(exchange, {
           connected: true,
           status: 'connected',
           lastPing: Date.now(),
           reconnectAttempts: 0,
-          latency,
+          latency: 0, // Will be updated by ping/pong
         });
         this.startPingInterval(exchange, ws);
       };
 
       ws.onmessage = (event) => {
         try {
+          // Handle pong response for RTT measurement
+          if (event.data === 'pong') {
+            const sentAt = this.lastPingSentAt.get(exchange);
+            if (sentAt) {
+              const rtt = Date.now() - sentAt;
+              this.updateConnectionState(exchange, { latency: rtt, lastPing: Date.now() });
+            }
+            return;
+          }
+          
           const data = JSON.parse(event.data);
           if (data.data?.[0]) {
             const ticker = data.data[0];
@@ -322,8 +336,7 @@ class ExchangeWebSocketManager {
       const connectTime = Date.now();
       
       ws.onopen = () => {
-        const latency = Date.now() - connectTime;
-        console.log(`✅ Bybit WebSocket connected (${latency}ms)`);
+        console.log(`✅ Bybit WebSocket connected`);
         
         // Subscribe to tickers
         const symbols = Array.from(this.subscribedSymbols);
@@ -332,12 +345,13 @@ class ExchangeWebSocketManager {
           args: symbols.map(s => `tickers.${s.replace('/', '')}`),
         }));
         
+        // Don't use handshake time as RTT - set to 0 (neutral) until real ping/pong
         this.updateConnectionState(exchange, {
           connected: true,
           status: 'connected',
           lastPing: Date.now(),
           reconnectAttempts: 0,
-          latency,
+          latency: 0, // Will be updated by ping/pong
         });
         this.startPingInterval(exchange, ws);
       };
@@ -345,6 +359,17 @@ class ExchangeWebSocketManager {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          
+          // Handle pong response for RTT measurement
+          if (data.op === 'pong' || data.ret_msg === 'pong') {
+            const sentAt = this.lastPingSentAt.get(exchange);
+            if (sentAt) {
+              const rtt = Date.now() - sentAt;
+              this.updateConnectionState(exchange, { latency: rtt, lastPing: Date.now() });
+            }
+            return;
+          }
+          
           if (data.data && data.topic?.startsWith('tickers.')) {
             const symbol = data.topic.replace('tickers.', '').replace('USDT', '/USDT');
             
@@ -444,7 +469,7 @@ class ExchangeWebSocketManager {
     }
   }
 
-  // Start ping interval to keep connection alive
+  // Start ping interval to keep connection alive and measure RTT
   private startPingInterval(exchange: ExchangeName, ws: WebSocket): void {
     this.clearPingInterval(exchange);
     
@@ -452,11 +477,13 @@ class ExchangeWebSocketManager {
       if (ws.readyState === WebSocket.OPEN) {
         try {
           if (exchange === 'okx') {
+            this.lastPingSentAt.set(exchange, Date.now());
             ws.send('ping');
           } else if (exchange === 'bybit') {
+            this.lastPingSentAt.set(exchange, Date.now());
             ws.send(JSON.stringify({ op: 'ping' }));
           }
-          // Binance doesn't require explicit ping
+          // Binance doesn't require explicit ping - latency stays 0
         } catch (e) {
           // Ignore
         }

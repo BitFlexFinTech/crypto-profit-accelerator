@@ -60,9 +60,11 @@ interface HFTState {
 // ============================================
 const SAFE_MODE_LATENCY_THRESHOLD = 200; // ms - enter safe mode if RTT > this
 const SAFE_MODE_EXIT_THRESHOLD = 150; // ms - exit safe mode if RTT < this
-const CONSECUTIVE_HIGH_LATENCY_TRIGGER = 3; // consecutive checks before safe mode
+const CONSECUTIVE_HIGH_LATENCY_TRIGGER = 5; // consecutive checks before safe mode (increased for stability)
 const CONSECUTIVE_LOW_LATENCY_EXIT = 3; // consecutive checks before exiting safe mode
 const FAT_FINGER_DEVIATION_PERCENT = 2; // max price deviation from market
+const STALE_RTT_WINDOW_MS = 60000; // 60s - ignore RTT samples older than this
+const SAFE_MODE_MIN_DURATION_MS = 30000; // 30s - minimum time in safe mode before auto-exit
 
 // ============================================
 // HFT CORE CLASS
@@ -284,24 +286,42 @@ class HFTCore {
     // Monitor latency every 2 seconds
     setInterval(() => {
       const connectionStatus = wsManager.getConnectionStatus();
+      const now = Date.now();
       
       (['binance', 'okx', 'bybit'] as ExchangeName[]).forEach(exchange => {
         const status = connectionStatus[exchange];
         if (!status) return;
         
+        // Check if RTT sample is valid and fresh
+        // Valid means: connected AND latency > 0 AND lastPing is recent
+        const isConnected = status.connected;
+        const hasValidRTT = status.latency > 0;
+        const isFreshSample = (now - status.lastPing) < STALE_RTT_WINDOW_MS;
+        const isValidSample = isConnected && hasValidRTT && isFreshSample;
+        
         const heartbeat: LatencyHeartbeat = {
           exchange,
           rtt: status.latency,
-          timestamp: Date.now(),
-          healthy: status.connected && status.latency < SAFE_MODE_LATENCY_THRESHOLD,
+          timestamp: now,
+          healthy: isConnected && (!hasValidRTT || status.latency < SAFE_MODE_LATENCY_THRESHOLD),
         };
         
         this.state.lastHeartbeats[exchange] = heartbeat;
         
-        // Record RTT for histogram/stats
-        this.recordRTT(exchange, status.latency);
+        // Only record RTT if we have a valid measurement
+        if (isValidSample) {
+          this.recordRTT(exchange, status.latency);
+        }
         
-        // Track consecutive high/low latency
+        // Only update consecutive counters for valid RTT samples
+        if (!isValidSample) {
+          // Invalid/stale/disconnected - reset both counters to prevent phantom triggers
+          this.state.consecutiveHighLatency[exchange] = 0;
+          this.state.consecutiveLowLatency[exchange] = 0;
+          return;
+        }
+        
+        // Track consecutive high/low latency only with valid samples
         if (status.latency > SAFE_MODE_LATENCY_THRESHOLD) {
           this.state.consecutiveHighLatency[exchange] = 
             (this.state.consecutiveHighLatency[exchange] || 0) + 1;
@@ -320,6 +340,12 @@ class HFTCore {
       
       // Check if we can exit safe mode (all exchanges have consecutive low latency)
       if (this.state.isSafeMode) {
+        // Enforce minimum duration in safe mode
+        const safeModeAge = now - (this.state.safeModeEnteredAt || now);
+        if (safeModeAge < SAFE_MODE_MIN_DURATION_MS) {
+          return; // Don't exit yet - minimum duration not met
+        }
+        
         const allStable = (['binance', 'okx', 'bybit'] as ExchangeName[]).every(
           ex => (this.state.consecutiveLowLatency[ex] || 0) >= CONSECUTIVE_LOW_LATENCY_EXIT
         );
@@ -388,9 +414,10 @@ class HFTCore {
     this.state.isSafeMode = false;
     this.state.safeModeReason = null;
     this.state.safeModeEnteredAt = null;
-    // Reset consecutive counters
+    // Reset ALL consecutive counters to prevent immediate re-entry
     (['binance', 'okx', 'bybit'] as ExchangeName[]).forEach(ex => {
       this.state.consecutiveLowLatency[ex] = 0;
+      this.state.consecutiveHighLatency[ex] = 0;
     });
     this.notifyStateChange();
   }
