@@ -725,7 +725,7 @@ serve(async (req) => {
     // ============================================
     if (requireProfit) {
       const currentPrice = requestedExitPrice || position.current_price || position.entry_price;
-      const profitTarget = position.profit_target || 0.50; // Default $0.50 if not set
+      const profitTarget = position.profit_target || 1.00; // Default $1.00 for spot
       
       // Calculate actual PnL with fees (same formula as final calculation)
       const feeRate = tradeType === "spot" ? 0.001 : 0.0005;
