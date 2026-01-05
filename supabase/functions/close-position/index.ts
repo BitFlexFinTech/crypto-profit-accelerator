@@ -728,11 +728,15 @@ serve(async (req) => {
 
     // ============================================
     // STEP 1.5: VERIFY PROFIT TARGET BEFORE EXIT (STRICT RULE)
-    // Recalculate PnL with CURRENT price to prevent stale DB values allowing losses
+    // For LIVE trades: ALWAYS enforce profit target, ignore requireProfit flag
+    // This is a safety measure to prevent any caller from closing live trades at a loss
     // ============================================
-    if (requireProfit) {
+    const isLiveTrade = !isPaperTrade && position.is_live === true;
+    const shouldEnforceProfitTarget = requireProfit || isLiveTrade;
+    
+    if (shouldEnforceProfitTarget) {
       const currentPrice = requestedExitPrice || position.current_price || position.entry_price;
-      const profitTarget = position.profit_target || 1.00; // Default $1.00 for spot
+      const profitTarget = position.profit_target || (tradeType === "futures" ? 3.0 : 1.0);
       
       // Calculate actual PnL with fees (same formula as final calculation)
       const feeRate = tradeType === "spot" ? 0.001 : 0.0005;
@@ -749,7 +753,7 @@ serve(async (req) => {
       
       const actualNetPnL = grossPnL - entryFee - exitFee - fundingFee;
       
-      console.log(`=== PROFIT CHECK ===`);
+      console.log(`=== PROFIT CHECK (Live: ${isLiveTrade}, RequireProfit: ${requireProfit}) ===`);
       console.log(`Entry: $${position.entry_price}, Current: $${currentPrice}`);
       console.log(`Gross PnL: $${grossPnL.toFixed(4)}, Fees: $${(entryFee + exitFee + fundingFee).toFixed(4)}`);
       console.log(`Actual Net PnL: $${actualNetPnL.toFixed(4)}, Required: $${profitTarget.toFixed(2)}`);

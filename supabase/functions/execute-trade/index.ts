@@ -390,6 +390,8 @@ async function placeBinanceLimitOrder(
 
 // ============================================
 // OKX - PLACE MARKET ORDER (ENTRY)
+// For spot BUY: use tgtCcy=quote_ccy and sz=USDT amount (OKX requirement)
+// For spot SELL and futures: use sz=base quantity
 // ============================================
 async function placeOKXMarketOrder(
   credentials: ExchangeCredentials,
@@ -397,58 +399,94 @@ async function placeOKXMarketOrder(
   side: string,
   quantity: number,
   tradeType: "spot" | "futures",
-  currentPrice?: number
+  currentPrice?: number,
+  orderSizeUsd?: number
 ): Promise<OrderResult> {
   try {
     const timestamp = new Date().toISOString();
     const formattedSymbol = formatSymbol(symbol, "okx", tradeType);
     
-    const formattedQty = formatQuantity(quantity, symbol, "okx", tradeType);
+    // Determine sizing based on trade type and side
+    let sz: string;
+    let tgtCcy: string | undefined;
     
-    // VALIDATION: Prevent 0 contract orders for OKX futures
-    if (tradeType === "futures" && (formattedQty === "0" || parseInt(formattedQty, 10) < 1)) {
-      console.error(`[OKX] Order size too small: ${quantity} -> ${formattedQty} contracts`);
-      return { 
-        success: false, 
-        orderId: "", 
-        error: "Order size too small for minimum contract size. Increase order size or choose a different pair.",
-        errorCode: "MIN_CONTRACT",
-        errorType: 'EXCHANGE_ERROR',
-      };
-    }
-    
-    // VALIDATION: Check minimum notional for OKX spot orders
-    if (tradeType === "spot") {
-      const price = currentPrice || 0;
-      const notionalValue = parseFloat(formattedQty) * price;
-      console.log(`[OKX SPOT] Checking notional: ${formattedQty} * $${price} = $${notionalValue.toFixed(2)}`);
+    if (tradeType === "spot" && side === "BUY") {
+      // OKX spot BUY: use quote currency (USDT) amount directly
+      // This is OKX's preferred method and avoids 51020 errors
+      const usdtAmount = orderSizeUsd || (quantity * (currentPrice || 0));
+      sz = usdtAmount.toFixed(2); // 2 decimal places for USDT
+      tgtCcy = "quote_ccy"; // Tell OKX we're specifying USDT amount, not base
+      console.log(`[OKX SPOT BUY] Using quote_ccy mode: sz=${sz} USDT`);
       
-      if (price > 0 && notionalValue < OKX_MIN_NOTIONAL) {
-        console.error(`[OKX SPOT] Order notional $${notionalValue.toFixed(2)} below minimum $${OKX_MIN_NOTIONAL}`);
+      // Validate minimum
+      if (usdtAmount < OKX_MIN_NOTIONAL) {
+        console.error(`[OKX SPOT] Order value $${usdtAmount.toFixed(2)} below minimum $${OKX_MIN_NOTIONAL}`);
         return { 
           success: false, 
           orderId: "", 
-          error: `Order value $${notionalValue.toFixed(2)} below OKX minimum $${OKX_MIN_NOTIONAL}. Increase order size.`,
+          error: `Order value $${usdtAmount.toFixed(2)} below OKX minimum $${OKX_MIN_NOTIONAL}. Increase order size.`,
           errorCode: "MIN_NOTIONAL",
           errorType: 'EXCHANGE_ERROR',
         };
       }
+    } else {
+      // Spot SELL or Futures: use formatted quantity (base asset or contracts)
+      const formattedQty = formatQuantity(quantity, symbol, "okx", tradeType);
+      sz = formattedQty;
+      
+      // VALIDATION: Prevent 0 contract orders for OKX futures
+      if (tradeType === "futures" && (formattedQty === "0" || parseInt(formattedQty, 10) < 1)) {
+        console.error(`[OKX] Order size too small: ${quantity} -> ${formattedQty} contracts`);
+        return { 
+          success: false, 
+          orderId: "", 
+          error: "Order size too small for minimum contract size. Increase order size or choose a different pair.",
+          errorCode: "MIN_CONTRACT",
+          errorType: 'EXCHANGE_ERROR',
+        };
+      }
+      
+      // VALIDATION: Check minimum notional for OKX spot SELL orders
+      if (tradeType === "spot") {
+        const price = currentPrice || 0;
+        const notionalValue = parseFloat(formattedQty) * price;
+        console.log(`[OKX SPOT SELL] Checking notional: ${formattedQty} * $${price} = $${notionalValue.toFixed(2)}`);
+        
+        if (price > 0 && notionalValue < OKX_MIN_NOTIONAL) {
+          console.error(`[OKX SPOT] Order notional $${notionalValue.toFixed(2)} below minimum $${OKX_MIN_NOTIONAL}`);
+          return { 
+            success: false, 
+            orderId: "", 
+            error: `Order value $${notionalValue.toFixed(2)} below OKX minimum $${OKX_MIN_NOTIONAL}. Increase order size.`,
+            errorCode: "MIN_NOTIONAL",
+            errorType: 'EXCHANGE_ERROR',
+          };
+        }
+      }
     }
     
-    const body = JSON.stringify({
+    // Build request body
+    const bodyObj: Record<string, string> = {
       instId: formattedSymbol,
       tdMode: tradeType === "futures" ? "cross" : "cash",
       side: side.toLowerCase(),
       ordType: "market",
-      sz: formattedQty,
-    });
+      sz: sz,
+    };
+    
+    // Add tgtCcy only for spot BUY
+    if (tgtCcy) {
+      bodyObj.tgtCcy = tgtCcy;
+    }
+    
+    const body = JSON.stringify(bodyObj);
     
     const preHash = timestamp + "POST" + "/api/v5/trade/order" + body;
     const signature = createHmac("sha256", credentials.apiSecret)
       .update(preHash)
       .digest("base64");
     
-    console.log(`[OKX] Placing MARKET ${side} order: ${quantity} ${formattedSymbol}`);
+    console.log(`[OKX] Placing MARKET ${side} order: sz=${sz} ${formattedSymbol}${tgtCcy ? ` (tgtCcy=${tgtCcy})` : ''}`);
     
     const response = await fetch("https://www.okx.com/api/v5/trade/order", {
       method: "POST",
@@ -467,7 +505,7 @@ async function placeOKXMarketOrder(
     if (data.code !== "0") {
       console.error(`[OKX] MARKET order failed:`, data);
       const errorCode = String(data.code);
-      const errorMsg = data.msg || `OKX API error: ${data.code}`;
+      const errorMsg = data.msg || data.data?.[0]?.sMsg || `OKX API error: ${data.code}`;
       const isPermErr = isPermissionError('okx', data.code, errorMsg);
       return { 
         success: false, 
@@ -768,12 +806,15 @@ async function placeEntryOrder(
   
   let result: OrderResult;
   
+  // Calculate orderSizeUsd for OKX spot BUY
+  const orderSizeUsd = quantity * requestedPrice;
+  
   switch (exchange.exchange) {
     case "binance":
       result = await placeBinanceMarketOrder(credentials, symbol, side, quantity, tradeType);
       break;
     case "okx":
-      result = await placeOKXMarketOrder(credentials, symbol, side, quantity, tradeType, requestedPrice);
+      result = await placeOKXMarketOrder(credentials, symbol, side, quantity, tradeType, requestedPrice, orderSizeUsd);
       break;
     case "bybit":
       result = await placeBybitMarketOrder(credentials, symbol, side, quantity, tradeType);
@@ -900,9 +941,18 @@ serve(async (req) => {
     console.log("Size:", tradeRequest.orderSizeUsd);
     console.log("Paper:", tradeRequest.isPaperTrade);
 
-    // Validate order size
+    // Validate order size - return structured error, never throw
     if (tradeRequest.orderSizeUsd < 333 || tradeRequest.orderSizeUsd > 450) {
-      throw new Error("Order size must be between $333 and $450");
+      console.error(`[VALIDATION] Order size $${tradeRequest.orderSizeUsd} out of range [333-450]`);
+      return new Response(JSON.stringify({
+        success: false,
+        error: "Order size must be between $333 and $450",
+        errorType: "VALIDATION_ERROR",
+        suggestion: "Adjust order size in bot settings to be between $333 and $450.",
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Get exchange info
@@ -913,7 +963,16 @@ serve(async (req) => {
       .single();
 
     if (exchangeError || !exchange) {
-      throw new Error("Exchange not found");
+      console.error(`[VALIDATION] Exchange not found: ${tradeRequest.exchangeId}`);
+      return new Response(JSON.stringify({
+        success: false,
+        error: "Exchange not found",
+        errorType: "VALIDATION_ERROR",
+        suggestion: "Verify exchange is configured correctly in Settings.",
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Calculate quantity and fees
@@ -940,10 +999,19 @@ serve(async (req) => {
       tradeRequest.entryPrice
     );
     
-    // HARD FAIL: If live trade and entry fails, abort entirely
+    // HARD FAIL: If live trade and entry fails, abort entirely - return structured error
     if (!tradeRequest.isPaperTrade && !entryResult.isLive) {
       console.error("=== LIVE ENTRY FAILED - ABORTING ===");
-      throw new Error(`Live entry order failed: ${entryResult.error}`);
+      return new Response(JSON.stringify({
+        success: false,
+        error: `Live entry order failed: ${entryResult.error}`,
+        errorType: entryResult.errorType || "EXCHANGE_ERROR",
+        errorCode: entryResult.errorCode,
+        suggestion: entryResult.suggestion || "Check exchange API permissions and balance.",
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
     
     const executedPrice = entryResult.executedPrice;

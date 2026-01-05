@@ -364,7 +364,7 @@ serve(async (req) => {
                 body: JSON.stringify({ 
                   positionId: position.id, 
                   exitPrice: currentPrice,
-                  requireProfit: false, // We already verified profit
+                  requireProfit: true, // ALWAYS require profit - never allow losses via fallback
                 }),
               });
               
@@ -444,6 +444,29 @@ serve(async (req) => {
       if (signal.confidence < confidenceThreshold || signal.score < scoreThreshold) {
         console.log(`Skipping ${signal.symbol}: confidence ${signal.confidence} < ${confidenceThreshold} or score ${signal.score} < ${scoreThreshold}`);
         continue;
+      }
+
+      // PRE-CHECK: OKX futures minimum contract size
+      // Skip signals that would result in 0 contracts
+      if (signal.exchange === "okx" && signal.tradeType === "futures") {
+        const OKX_CONTRACT_SIZE: Record<string, number> = {
+          'BTC': 0.01, 'ETH': 0.1, 'SOL': 1, 'DOT': 10, 'XRP': 100, 
+          'DOGE': 1000, 'ADA': 100, 'LINK': 1, 'AVAX': 1, 'MATIC': 100,
+          'LTC': 0.1, 'BNB': 0.1, 'ATOM': 1, 'NEAR': 10, 'UNI': 1,
+          'OP': 10, 'ARB': 10, 'SUI': 10, 'SEI': 100,
+        };
+        
+        const baseAsset = signal.symbol.replace(/[-\/]?(USDT|USDC|BUSD|USD).*$/i, '').toUpperCase();
+        const contractSize = OKX_CONTRACT_SIZE[baseAsset] ?? 1;
+        const orderSize = Math.min(Math.max(settings.min_order_size || 10, 333), settings.max_order_size || 1000);
+        const quantityNeeded = orderSize / signal.entryPrice;
+        const numContracts = Math.floor(quantityNeeded / contractSize);
+        
+        if (numContracts < 1) {
+          console.log(`[SKIP] OKX futures ${signal.symbol}: $${orderSize} -> ${quantityNeeded.toFixed(6)} ${baseAsset} = ${numContracts} contracts (need ≥1)`);
+          result.actions.push(`Skipped OKX futures ${signal.symbol} - order size too small for 1 contract`);
+          continue;
+        }
       }
 
       // Find exchange for this signal
