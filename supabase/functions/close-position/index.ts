@@ -668,11 +668,12 @@ serve(async (req) => {
         
         return new Response(JSON.stringify({
           success: false,
-          error: `Cannot close: Need +$${profitTarget.toFixed(2)}, currently at ${estimatedPnL >= 0 ? '+' : ''}$${estimatedPnL.toFixed(2)}`,
+          blocked: true,
+          message: `Waiting for profit target: Need +$${profitTarget.toFixed(2)}, currently at ${estimatedPnL >= 0 ? '+' : ''}$${estimatedPnL.toFixed(2)}`,
           profitRequired: profitTarget,
           currentPnL: estimatedPnL,
         }), {
-          status: 400,
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
