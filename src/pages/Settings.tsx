@@ -1,6 +1,7 @@
 import { ExchangeConnections } from '@/components/settings/ExchangeConnections';
 import { TradingConfig } from '@/components/settings/TradingConfig';
 import { LatencyThresholds } from '@/components/settings/LatencyThresholds';
+import { VPSInfrastructure } from '@/components/settings/VPSInfrastructure';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
@@ -11,7 +12,7 @@ export default function SettingsPage() {
       <div className="flex-shrink-0 h-12 border-b border-border px-4 flex items-center bg-card/50">
         <div>
           <h1 className="text-lg font-bold text-foreground">Settings</h1>
-          <p className="text-xs text-muted-foreground">Exchange connections and trading configuration</p>
+          <p className="text-xs text-muted-foreground">Exchange connections, trading, and VPS configuration</p>
         </div>
       </div>
 
@@ -27,6 +28,10 @@ export default function SettingsPage() {
           <Separator className="bg-border" />
           
           <LatencyThresholds />
+          
+          <Separator className="bg-border" />
+          
+          <VPSInfrastructure />
         </div>
       </ScrollArea>
     </div>
