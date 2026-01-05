@@ -521,6 +521,60 @@ export type Database = {
         }
         Relationships: []
       }
+      vps_deployments: {
+        Row: {
+          created_at: string | null
+          error_message: string | null
+          id: string
+          instance_id: string | null
+          ip_address: string | null
+          last_heartbeat: string | null
+          monthly_cost_estimate: number | null
+          provider: string
+          region: string
+          region_city: string | null
+          status: string | null
+          updated_at: string | null
+          user_id: string | null
+          websocket_connected: boolean | null
+          websocket_endpoint: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          instance_id?: string | null
+          ip_address?: string | null
+          last_heartbeat?: string | null
+          monthly_cost_estimate?: number | null
+          provider: string
+          region: string
+          region_city?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+          websocket_connected?: boolean | null
+          websocket_endpoint?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          instance_id?: string | null
+          ip_address?: string | null
+          last_heartbeat?: string | null
+          monthly_cost_estimate?: number | null
+          provider?: string
+          region?: string
+          region_city?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+          websocket_connected?: boolean | null
+          websocket_endpoint?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

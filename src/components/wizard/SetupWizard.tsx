@@ -11,6 +11,7 @@ import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { EXCHANGE_CONFIGS, ExchangeName } from '@/types/trading';
+import { VPSDeploymentStep } from './VPSDeploymentStep';
 import { 
   ArrowRight, 
   ArrowLeft, 
@@ -19,7 +20,8 @@ import {
   Shield, 
   TrendingUp,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Server
 } from 'lucide-react';
 
 interface SetupWizardProps {
@@ -35,8 +37,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [connecting, setConnecting] = useState<string | null>(null);
   const [apiCredentials, setApiCredentials] = useState<Record<string, { apiKey: string; apiSecret: string; passphrase?: string }>>({});
 
-  const totalSteps = 4;
+  const totalSteps = 5;
   const progressPercent = (currentStep / totalSteps) * 100;
+  const connectedExchangeNames = exchanges.filter(e => e.is_connected).map(e => e.exchange);
 
   const handleNext = () => {
     const nextStep = Math.min(currentStep + 1, totalSteps);
@@ -410,6 +413,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   );
 
   const renderStep4 = () => (
+    <VPSDeploymentStep 
+      connectedExchanges={connectedExchangeNames}
+      onDeploymentComplete={(deploymentId) => {
+        console.log('VPS deployed:', deploymentId);
+      }}
+    />
+  );
+
+  const renderStep5 = () => (
     <div className="space-y-6 text-center">
       <div className="flex justify-center">
         <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center">
@@ -467,7 +479,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         {/* Progress bar */}
         <div className="mb-8">
           <div className="flex justify-between mb-2">
-            {[1, 2, 3, 4].map((step) => (
+            {[1, 2, 3, 4, 5].map((step) => (
               <div 
                 key={step}
                 className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${
@@ -485,6 +497,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             <span>Welcome</span>
             <span>Exchanges</span>
             <span>Settings</span>
+            <span>Deploy VPS</span>
             <span>Complete</span>
           </div>
         </div>
@@ -496,6 +509,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             {currentStep === 2 && renderStep2()}
             {currentStep === 3 && renderStep3()}
             {currentStep === 4 && renderStep4()}
+            {currentStep === 5 && renderStep5()}
           </CardContent>
         </Card>
 
