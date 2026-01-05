@@ -283,15 +283,20 @@ serve(async (req) => {
     const slotsAvailable = maxPositions - openPositionCount;
     const signalsToExecute = signals.slice(0, slotsAvailable);
     
-    // Determine confidence threshold based on aggressiveness (LOWERED for realistic trading)
+    // Determine confidence threshold based on aggressiveness (LOWERED for continuous trading)
     const confidenceThreshold = 
-      settings.ai_aggressiveness === "aggressive" ? 0.40 :
-      settings.ai_aggressiveness === "conservative" ? 0.70 : 0.50;
+      settings.ai_aggressiveness === "aggressive" ? 0.30 :
+      settings.ai_aggressiveness === "conservative" ? 0.55 : 0.35;
+
+    // Lower score threshold for continuous 24/7 trading
+    const scoreThreshold = 
+      settings.ai_aggressiveness === "aggressive" ? 35 :
+      settings.ai_aggressiveness === "conservative" ? 55 : 40;
 
     for (const signal of signalsToExecute) {
-      // Check if signal meets criteria (lowered score threshold from 60 to 50)
-      if (signal.confidence < confidenceThreshold || signal.score < 50) {
-        console.log(`Skipping ${signal.symbol}: confidence ${signal.confidence} < ${confidenceThreshold} or score ${signal.score} < 50`);
+      // Check if signal meets criteria (lowered thresholds for continuous trading)
+      if (signal.confidence < confidenceThreshold || signal.score < scoreThreshold) {
+        console.log(`Skipping ${signal.symbol}: confidence ${signal.confidence} < ${confidenceThreshold} or score ${signal.score} < ${scoreThreshold}`);
         continue;
       }
 
