@@ -96,16 +96,27 @@ const QUANTITY_PRECISION: Record<string, number> = {
   // Mid-value coins
   'SOL': 3,    // stepSize: 0.001
   'BNB': 3,    // stepSize: 0.001
+  'LTC': 3,    // stepSize: 0.001
   'AVAX': 2,   // stepSize: 0.01
   'LINK': 2,   // stepSize: 0.01
-  // Low-value coins - fewer decimals (integers only)
+  'UNI': 2,    // stepSize: 0.01
+  'AAVE': 2,   // stepSize: 0.01
+  'DOT': 1,    // stepSize: 0.1
+  'ATOM': 1,   // stepSize: 0.1
+  'NEAR': 1,   // stepSize: 0.1
+  'OP': 1,     // stepSize: 0.1
+  'ARB': 1,    // stepSize: 0.1
   'XRP': 1,    // stepSize: 0.1
+  'MATIC': 0,  // stepSize: 1
   'ADA': 0,    // stepSize: 1
   'DOGE': 0,   // stepSize: 1
   'SHIB': 0,   // stepSize: 1
   'BONK': 0,   // stepSize: 1
   'PEPE': 0,   // stepSize: 1
   'FLOKI': 0,  // stepSize: 1
+  'TRX': 0,    // stepSize: 1
+  'SUI': 0,    // stepSize: 1
+  'SEI': 0,    // stepSize: 1
 };
 
 // Format quantity to proper precision for exchange LOT_SIZE filter
