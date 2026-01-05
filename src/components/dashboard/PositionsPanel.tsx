@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useTrading } from '@/contexts/TradingContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,8 @@ import { EXCHANGE_CONFIGS } from '@/types/trading';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
+
+type SortOption = 'pnl' | 'tpProgress' | 'symbol';
 
 export function PositionsPanel() {
   const { 
@@ -28,6 +30,69 @@ export function PositionsPanel() {
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
   const [forceClosingId, setForceClosingId] = useState<string | null>(null);
   const [isReconciling, setIsReconciling] = useState(false);
+  const [sortBy, setSortBy] = useState<SortOption>('pnl');
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+
+  // Calculate TP progress for a position
+  const calculateTpProgress = useCallback((position: typeof positions[0], currentPrice: number | undefined) => {
+    if (!position.take_profit_price || !currentPrice) return 0;
+    
+    const entryPrice = position.entry_price;
+    const tpPrice = Number(position.take_profit_price);
+    
+    if (position.direction === 'long') {
+      const totalDistance = tpPrice - entryPrice;
+      const currentDistance = currentPrice - entryPrice;
+      return totalDistance > 0 ? Math.min(100, Math.max(0, (currentDistance / totalDistance) * 100)) : 0;
+    } else {
+      const totalDistance = entryPrice - tpPrice;
+      const currentDistance = entryPrice - currentPrice;
+      return totalDistance > 0 ? Math.min(100, Math.max(0, (currentDistance / totalDistance) * 100)) : 0;
+    }
+  }, []);
+
+  // Sorted positions based on selected sort option
+  const sortedPositions = useMemo(() => {
+    const sorted = [...positions];
+    
+    switch (sortBy) {
+      case 'pnl':
+        return sorted.sort((a, b) => b.unrealized_pnl - a.unrealized_pnl);
+      case 'tpProgress':
+        return sorted.sort((a, b) => {
+          const aProgress = calculateTpProgress(a, prices[a.symbol] || a.current_price);
+          const bProgress = calculateTpProgress(b, prices[b.symbol] || b.current_price);
+          return bProgress - aProgress;
+        });
+      case 'symbol':
+        return sorted.sort((a, b) => a.symbol.localeCompare(b.symbol));
+      default:
+        return sorted;
+    }
+  }, [positions, sortBy, prices, calculateTpProgress]);
+
+  // Auto-refresh positions from exchanges every 30 seconds
+  useEffect(() => {
+    if (!autoRefreshEnabled || positions.length === 0) return;
+    
+    const refreshInterval = setInterval(async () => {
+      if (isAutoRefreshing || isReconciling || isVerifying) return;
+      
+      setIsAutoRefreshing(true);
+      try {
+        await verifyPositions(false);
+        setLastRefresh(new Date());
+      } catch (error) {
+        console.error('Auto-refresh failed:', error);
+      } finally {
+        setIsAutoRefreshing(false);
+      }
+    }, 30000);
+    
+    return () => clearInterval(refreshInterval);
+  }, [autoRefreshEnabled, positions.length, isAutoRefreshing, isReconciling, isVerifying, verifyPositions]);
 
   const getExchangeName = (exchangeId?: string) => {
     if (!exchangeId) return 'Unk';
@@ -194,6 +259,60 @@ export function PositionsPanel() {
           </p>
         </div>
         <div className="flex items-center gap-1">
+          {/* Sort Options */}
+          <div className="flex items-center gap-0.5 border border-border rounded px-0.5">
+            <Button
+              variant={sortBy === 'pnl' ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={() => setSortBy('pnl')}
+              className="h-4 px-1 text-[8px]"
+              title="Sort by Profit/Loss"
+            >
+              P&L
+            </Button>
+            <Button
+              variant={sortBy === 'tpProgress' ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={() => setSortBy('tpProgress')}
+              className="h-4 px-1 text-[8px]"
+              title="Sort by TP Progress"
+            >
+              TP%
+            </Button>
+            <Button
+              variant={sortBy === 'symbol' ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={() => setSortBy('symbol')}
+              className="h-4 px-1 text-[8px]"
+              title="Sort Alphabetically"
+            >
+              A-Z
+            </Button>
+          </div>
+
+          {/* Auto-Refresh Toggle */}
+          <Button
+            variant={autoRefreshEnabled ? 'outline' : 'ghost'}
+            size="sm"
+            onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+            className={cn(
+              "h-5 px-1 text-[9px] gap-0.5",
+              autoRefreshEnabled && "border-primary/50"
+            )}
+            title={autoRefreshEnabled ? "Auto-refresh ON (30s)" : "Auto-refresh OFF"}
+          >
+            <RefreshCcw className={cn(
+              "h-2.5 w-2.5",
+              (autoRefreshEnabled && isAutoRefreshing) && "animate-spin"
+            )} />
+            {autoRefreshEnabled ? 'Auto' : 'Off'}
+          </Button>
+          {lastRefresh && (
+            <span className="text-[8px] text-muted-foreground">
+              {Math.floor((Date.now() - lastRefresh.getTime()) / 1000)}s
+            </span>
+          )}
+
           <Button 
             variant="outline" 
             size="sm"
@@ -240,7 +359,7 @@ export function PositionsPanel() {
         ) : (
           <ScrollArea className="h-full">
             <div className="space-y-1 p-1.5">
-              {positions.map((position) => {
+              {sortedPositions.map((position) => {
                 const pnlPercent = position.entry_price > 0 
                   ? ((position.unrealized_pnl / position.order_size_usd) * 100)
                   : 0;
