@@ -7,17 +7,35 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Rate limiting per exchange
-const RATE_LIMITS: Record<string, { requests: number; window: number }> = {
-  binance: { requests: 1200, window: 60000 },
-  okx: { requests: 60, window: 2000 },
-  bybit: { requests: 120, window: 60000 },
-  kucoin: { requests: 30, window: 1000 },
-  hyperliquid: { requests: 1200, window: 60000 },
-  nexo: { requests: 30, window: 1000 },
-};
+interface AssetBalance {
+  asset: string;
+  free: number;
+  locked: number;
+  total: number;
+  usdValue?: number;
+}
 
-async function fetchBinanceBalance(apiKey: string, apiSecret: string): Promise<{ total: number; available: number; locked: number }> {
+// Fetch current prices from Binance for USD value calculation
+async function fetchBinancePrices(): Promise<Record<string, number>> {
+  try {
+    const response = await fetch("https://api.binance.com/api/v3/ticker/price");
+    const data = await response.json();
+    const prices: Record<string, number> = { USDT: 1, USDC: 1, BUSD: 1 };
+    
+    for (const ticker of data) {
+      if (ticker.symbol.endsWith("USDT")) {
+        const asset = ticker.symbol.replace("USDT", "");
+        prices[asset] = parseFloat(ticker.price) || 0;
+      }
+    }
+    return prices;
+  } catch (error) {
+    console.error("Failed to fetch prices:", error);
+    return { USDT: 1, USDC: 1, BUSD: 1 };
+  }
+}
+
+async function fetchBinanceBalances(apiKey: string, apiSecret: string): Promise<AssetBalance[]> {
   const timestamp = Date.now();
   const queryString = `timestamp=${timestamp}`;
   const signature = createHmac("sha256", apiSecret).update(queryString).digest("hex");
@@ -35,25 +53,28 @@ async function fetchBinanceBalance(apiKey: string, apiSecret: string): Promise<{
   }
   
   const data = await response.json();
-  let total = 0;
-  let available = 0;
-  let locked = 0;
+  const balances: AssetBalance[] = [];
   
-  // Sum up USDT balances (and convert other assets to USDT equivalent if needed)
+  // Get ALL non-zero balances
   for (const balance of data.balances || []) {
-    if (balance.asset === "USDT") {
-      const free = parseFloat(balance.free) || 0;
-      const lockedAmt = parseFloat(balance.locked) || 0;
-      total += free + lockedAmt;
-      available += free;
-      locked += lockedAmt;
+    const free = parseFloat(balance.free) || 0;
+    const locked = parseFloat(balance.locked) || 0;
+    const total = free + locked;
+    
+    if (total > 0.00001) {
+      balances.push({
+        asset: balance.asset,
+        free,
+        locked,
+        total
+      });
     }
   }
   
-  return { total, available, locked };
+  return balances;
 }
 
-async function fetchOKXBalance(apiKey: string, apiSecret: string, passphrase: string): Promise<{ total: number; available: number; locked: number }> {
+async function fetchOKXBalances(apiKey: string, apiSecret: string, passphrase: string): Promise<AssetBalance[]> {
   const timestamp = new Date().toISOString();
   const method = "GET";
   const requestPath = "/api/v5/account/balance";
@@ -76,22 +97,28 @@ async function fetchOKXBalance(apiKey: string, apiSecret: string, passphrase: st
   }
   
   const data = await response.json();
-  let total = 0;
-  let available = 0;
-  let locked = 0;
+  const balances: AssetBalance[] = [];
   
+  // Get ALL non-zero balances
   for (const detail of data.data?.[0]?.details || []) {
-    if (detail.ccy === "USDT") {
-      total += parseFloat(detail.eq) || 0;
-      available += parseFloat(detail.availBal) || 0;
-      locked += parseFloat(detail.frozenBal) || 0;
+    const total = parseFloat(detail.eq) || 0;
+    const available = parseFloat(detail.availBal) || 0;
+    const frozen = parseFloat(detail.frozenBal) || 0;
+    
+    if (total > 0.00001) {
+      balances.push({
+        asset: detail.ccy,
+        free: available,
+        locked: frozen,
+        total
+      });
     }
   }
   
-  return { total, available, locked };
+  return balances;
 }
 
-async function fetchBybitBalance(apiKey: string, apiSecret: string): Promise<{ total: number; available: number; locked: number }> {
+async function fetchBybitBalances(apiKey: string, apiSecret: string): Promise<AssetBalance[]> {
   const timestamp = Date.now().toString();
   const recvWindow = "5000";
   const params = `accountType=UNIFIED`;
@@ -113,24 +140,29 @@ async function fetchBybitBalance(apiKey: string, apiSecret: string): Promise<{ t
   }
   
   const data = await response.json();
-  let total = 0;
-  let available = 0;
-  let locked = 0;
+  const balances: AssetBalance[] = [];
   
   for (const account of data.result?.list || []) {
     for (const coin of account.coin || []) {
-      if (coin.coin === "USDT") {
-        total += parseFloat(coin.walletBalance) || 0;
-        available += parseFloat(coin.availableToWithdraw) || 0;
-        locked += parseFloat(coin.locked) || 0;
+      const walletBalance = parseFloat(coin.walletBalance) || 0;
+      const available = parseFloat(coin.availableToWithdraw) || 0;
+      const locked = parseFloat(coin.locked) || 0;
+      
+      if (walletBalance > 0.00001) {
+        balances.push({
+          asset: coin.coin,
+          free: available,
+          locked: locked,
+          total: walletBalance
+        });
       }
     }
   }
   
-  return { total, available, locked };
+  return balances;
 }
 
-async function fetchKuCoinBalance(apiKey: string, apiSecret: string, passphrase: string): Promise<{ total: number; available: number; locked: number }> {
+async function fetchKuCoinBalances(apiKey: string, apiSecret: string, passphrase: string): Promise<AssetBalance[]> {
   const timestamp = Date.now().toString();
   const method = "GET";
   const endpoint = "/api/v1/accounts";
@@ -154,26 +186,28 @@ async function fetchKuCoinBalance(apiKey: string, apiSecret: string, passphrase:
   }
   
   const data = await response.json();
-  let total = 0;
-  let available = 0;
-  let locked = 0;
+  const assetMap: Record<string, AssetBalance> = {};
   
   for (const account of data.data || []) {
-    if (account.currency === "USDT") {
-      const balance = parseFloat(account.balance) || 0;
-      const availableAmt = parseFloat(account.available) || 0;
-      const holds = parseFloat(account.holds) || 0;
-      total += balance;
-      available += availableAmt;
-      locked += holds;
+    const balance = parseFloat(account.balance) || 0;
+    const availableAmt = parseFloat(account.available) || 0;
+    const holds = parseFloat(account.holds) || 0;
+    
+    if (balance > 0.00001) {
+      const asset = account.currency;
+      if (!assetMap[asset]) {
+        assetMap[asset] = { asset, free: 0, locked: 0, total: 0 };
+      }
+      assetMap[asset].free += availableAmt;
+      assetMap[asset].locked += holds;
+      assetMap[asset].total += balance;
     }
   }
   
-  return { total, available, locked };
+  return Object.values(assetMap);
 }
 
-async function fetchHyperliquidBalance(apiKey: string): Promise<{ total: number; available: number; locked: number }> {
-  // Hyperliquid uses wallet address as API key
+async function fetchHyperliquidBalances(apiKey: string): Promise<AssetBalance[]> {
   const response = await fetch("https://api.hyperliquid.xyz/info", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -192,14 +226,16 @@ async function fetchHyperliquidBalance(apiKey: string): Promise<{ total: number;
   const accountValue = parseFloat(data.marginSummary?.accountValue) || 0;
   const totalMarginUsed = parseFloat(data.marginSummary?.totalMarginUsed) || 0;
   
-  return {
-    total: accountValue,
-    available: accountValue - totalMarginUsed,
+  // Hyperliquid primarily uses USDC
+  return [{
+    asset: "USDC",
+    free: accountValue - totalMarginUsed,
     locked: totalMarginUsed,
-  };
+    total: accountValue
+  }];
 }
 
-async function fetchNexoBalance(apiKey: string, apiSecret: string): Promise<{ total: number; available: number; locked: number }> {
+async function fetchNexoBalances(apiKey: string, apiSecret: string): Promise<AssetBalance[]> {
   const nonce = Date.now().toString();
   const signature = createHmac("sha256", apiSecret).update(nonce).digest("hex");
   
@@ -217,25 +253,28 @@ async function fetchNexoBalance(apiKey: string, apiSecret: string): Promise<{ to
   }
   
   const data = await response.json();
-  let total = 0;
-  let available = 0;
-  let locked = 0;
+  const balances: AssetBalance[] = [];
   
   for (const asset of data.balances || []) {
-    if (asset.assetName === "USDT" || asset.assetName === "USDX") {
-      total += parseFloat(asset.totalBalance) || 0;
-      available += parseFloat(asset.availableBalance) || 0;
-      locked += parseFloat(asset.lockedBalance) || 0;
+    const total = parseFloat(asset.totalBalance) || 0;
+    const available = parseFloat(asset.availableBalance) || 0;
+    const locked = parseFloat(asset.lockedBalance) || 0;
+    
+    if (total > 0.00001) {
+      balances.push({
+        asset: asset.assetName,
+        free: available,
+        locked: locked,
+        total
+      });
     }
   }
   
-  return { total, available, locked };
+  return balances;
 }
 
 // Simple decryption (in production, use proper key management)
 function decryptKey(encrypted: string): string {
-  // If keys are stored in plain text (for development), return as-is
-  // In production, implement proper AES decryption with Supabase Vault
   return encrypted;
 }
 
@@ -259,11 +298,14 @@ serve(async (req) => {
 
     console.log(`Syncing balances for ${exchanges?.length || 0} connected exchanges`);
 
+    // Fetch current prices for USD value calculation
+    const prices = await fetchBinancePrices();
+    console.log(`Fetched prices for ${Object.keys(prices).length} assets`);
+
     const results: any[] = [];
 
     for (const exchange of exchanges || []) {
       try {
-        // Skip if no API keys configured
         if (!exchange.api_key_encrypted || !exchange.api_secret_encrypted) {
           console.log(`Skipping ${exchange.exchange}: No API keys configured`);
           results.push({
@@ -278,59 +320,59 @@ serve(async (req) => {
         const apiSecret = decryptKey(exchange.api_secret_encrypted);
         const passphrase = exchange.passphrase_encrypted ? decryptKey(exchange.passphrase_encrypted) : "";
         
-        let balanceData: { total: number; available: number; locked: number };
+        let assetBalances: AssetBalance[];
         
         switch (exchange.exchange) {
           case "binance":
-            balanceData = await fetchBinanceBalance(apiKey, apiSecret);
+            assetBalances = await fetchBinanceBalances(apiKey, apiSecret);
             break;
           case "okx":
-            balanceData = await fetchOKXBalance(apiKey, apiSecret, passphrase);
+            assetBalances = await fetchOKXBalances(apiKey, apiSecret, passphrase);
             break;
           case "bybit":
-            balanceData = await fetchBybitBalance(apiKey, apiSecret);
+            assetBalances = await fetchBybitBalances(apiKey, apiSecret);
             break;
           case "kucoin":
-            balanceData = await fetchKuCoinBalance(apiKey, apiSecret, passphrase);
+            assetBalances = await fetchKuCoinBalances(apiKey, apiSecret, passphrase);
             break;
           case "hyperliquid":
-            balanceData = await fetchHyperliquidBalance(apiKey);
+            assetBalances = await fetchHyperliquidBalances(apiKey);
             break;
           case "nexo":
-            balanceData = await fetchNexoBalance(apiKey, apiSecret);
+            assetBalances = await fetchNexoBalances(apiKey, apiSecret);
             break;
           default:
             console.log(`Unknown exchange: ${exchange.exchange}`);
             continue;
         }
 
-        // Update or insert balance record
-        const { data: existingBalance } = await supabase
-          .from("balances")
-          .select("id")
-          .eq("exchange_id", exchange.id)
-          .maybeSingle();
+        // Calculate USD values for each asset
+        let totalUsdValue = 0;
+        for (const balance of assetBalances) {
+          const price = prices[balance.asset] || 0;
+          balance.usdValue = balance.total * price;
+          totalUsdValue += balance.usdValue;
+        }
 
-        if (existingBalance) {
-          await supabase
-            .from("balances")
-            .update({
-              total: balanceData.total,
-              available: balanceData.available,
-              locked: balanceData.locked,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", existingBalance.id);
-        } else {
+        console.log(`${exchange.exchange}: Found ${assetBalances.length} assets, total USD: $${totalUsdValue.toFixed(2)}`);
+
+        // Delete existing balances for this exchange
+        await supabase
+          .from("balances")
+          .delete()
+          .eq("exchange_id", exchange.id);
+
+        // Insert each asset as a separate balance record
+        for (const balance of assetBalances) {
           await supabase
             .from("balances")
             .insert({
               exchange_id: exchange.id,
               user_id: exchange.user_id,
-              currency: "USDT",
-              total: balanceData.total,
-              available: balanceData.available,
-              locked: balanceData.locked,
+              currency: balance.asset,
+              total: balance.usdValue || balance.total, // Store USD value for non-stables, or amount for stables
+              available: balance.free,
+              locked: balance.locked,
             });
         }
 
@@ -342,13 +384,16 @@ serve(async (req) => {
 
         results.push({
           exchange: exchange.exchange,
-          balance: balanceData.total,
-          available: balanceData.available,
-          locked: balanceData.locked,
+          assets: assetBalances.map(b => ({
+            asset: b.asset,
+            amount: b.total,
+            usdValue: b.usdValue
+          })),
+          totalUsd: totalUsdValue,
           status: "synced",
         });
 
-        console.log(`Synced ${exchange.exchange}: Total $${balanceData.total.toFixed(2)}, Available $${balanceData.available.toFixed(2)}`);
+        console.log(`Synced ${exchange.exchange}: ${assetBalances.length} assets, Total $${totalUsdValue.toFixed(2)}`);
 
       } catch (err) {
         console.error(`Error syncing ${exchange.exchange}:`, err);
