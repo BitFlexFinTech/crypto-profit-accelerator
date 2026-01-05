@@ -108,6 +108,7 @@ interface TradingContextType {
   forceAnalyze: () => Promise<TradingSignal[]>;
   closePosition: (positionId: string) => Promise<void>;
   closeAllPositions: () => Promise<void>;
+  forceClosePosition: (positionId: string) => Promise<void>;
   refreshData: () => Promise<void>;
   syncBalances: () => Promise<void>;
   testTradeTopSignal: () => Promise<void>;
@@ -1340,6 +1341,35 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Force close a phantom position (DB cleanup only - no exchange interaction)
+  const forceClosePosition = useCallback(async (positionId: string) => {
+    try {
+      // Directly mark position as closed in DB - no exchange call
+      const { error } = await supabase
+        .from('positions')
+        .update({ 
+          status: 'closed', 
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', positionId);
+      
+      if (error) throw error;
+      
+      // Remove from local state
+      setPositions(prev => prev.filter(p => p.id !== positionId));
+      setPositionVerifications(prev => {
+        const updated = { ...prev };
+        delete updated[positionId];
+        return updated;
+      });
+      
+      console.log(`Force closed phantom position: ${positionId}`);
+    } catch (error) {
+      console.error('Error force closing position:', error);
+      throw error;
+    }
+  }, []);
+
   // Sync balances
   const syncBalances = useCallback(async () => {
     try {
@@ -1740,6 +1770,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     forceAnalyze,
     closePosition,
     closeAllPositions,
+    forceClosePosition,
     refreshData: fetchAllData,
     syncBalances,
     testTradeTopSignal,

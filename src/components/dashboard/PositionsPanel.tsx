@@ -16,6 +16,7 @@ export function PositionsPanel() {
     loading, 
     closePosition, 
     closeAllPositions, 
+    forceClosePosition,
     exchanges, 
     prices, 
     reconcilePositions,
@@ -24,6 +25,7 @@ export function PositionsPanel() {
     isVerifying,
   } = useTrading();
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
+  const [forceClosingId, setForceClosingId] = useState<string | null>(null);
   const [isReconciling, setIsReconciling] = useState(false);
 
   const getExchangeName = (exchangeId?: string) => {
@@ -309,31 +311,60 @@ export function PositionsPanel() {
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
-                          <Button
-                            variant={canClose ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => handleClosePosition(position.id, position.unrealized_pnl, position.profit_target, position.symbol)}
-                            disabled={isClosing || !canClose}
-                            className={cn(
-                              "h-5 px-1.5 text-[10px] gap-0.5",
-                              canClose 
-                                ? "bg-primary hover:bg-primary/90" 
-                                : "opacity-50 cursor-not-allowed"
-                            )}
-                          >
-                            {isClosing ? (
-                              <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                            ) : canClose ? (
-                              <TrendingUp className="h-2.5 w-2.5" />
-                            ) : (
-                              <X className="h-2.5 w-2.5" />
-                            )}
-                            Close
-                          </Button>
-                          {!canClose && (
-                            <span className="text-[8px] text-muted-foreground whitespace-nowrap">
-                              +${(position.profit_target - position.unrealized_pnl).toFixed(2)}
-                            </span>
+                          {isPhantom ? (
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={async () => {
+                                setForceClosingId(position.id);
+                                try {
+                                  await forceClosePosition(position.id);
+                                  toast.success('Phantom position removed');
+                                } catch {
+                                  toast.error('Failed to remove');
+                                } finally {
+                                  setForceClosingId(null);
+                                }
+                              }}
+                              disabled={forceClosingId === position.id}
+                              className="h-5 px-1.5 text-[10px] gap-0.5"
+                            >
+                              {forceClosingId === position.id ? (
+                                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                              ) : (
+                                <X className="h-2.5 w-2.5" />
+                              )}
+                              Remove
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                variant={canClose ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => handleClosePosition(position.id, position.unrealized_pnl, position.profit_target, position.symbol)}
+                                disabled={isClosing || !canClose}
+                                className={cn(
+                                  "h-5 px-1.5 text-[10px] gap-0.5",
+                                  canClose 
+                                    ? "bg-primary hover:bg-primary/90" 
+                                    : "opacity-50 cursor-not-allowed"
+                                )}
+                              >
+                                {isClosing ? (
+                                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                ) : canClose ? (
+                                  <TrendingUp className="h-2.5 w-2.5" />
+                                ) : (
+                                  <X className="h-2.5 w-2.5" />
+                                )}
+                                Close
+                              </Button>
+                              {!canClose && (
+                                <span className="text-[8px] text-muted-foreground whitespace-nowrap">
+                                  +${(position.profit_target - position.unrealized_pnl).toFixed(2)}
+                                </span>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>
