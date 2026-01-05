@@ -63,6 +63,26 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // STEP 0: AUTO-RECONCILE POSITIONS (detect and fix ghost positions every loop)
+    console.log("Running position reconciliation...");
+    try {
+      const reconcileResponse = await fetch(`${supabaseUrl}/functions/v1/reconcile-positions`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${supabaseKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ autoFix: true }),
+      });
+      
+      const reconcileResult = await reconcileResponse.json();
+      if (reconcileResult.summary?.fixed > 0) {
+        result.actions.push(`Auto-fixed ${reconcileResult.summary.fixed} ghost positions`);
+      }
+    } catch (e) {
+      console.warn("Reconciliation failed:", e);
+    }
+
     // STEP 1: Get bot settings
     const { data: settings, error: settingsError } = await supabase
       .from("bot_settings")
@@ -166,7 +186,7 @@ serve(async (req) => {
                     "Authorization": `Bearer ${supabaseKey}`,
                     "Content-Type": "application/json",
                   },
-                  body: JSON.stringify({ positionId: position.id }),
+                  body: JSON.stringify({ positionId: position.id, requireProfit: true }),
                 });
                 
                 const closeResult = await closeResponse.json();
@@ -200,7 +220,8 @@ serve(async (req) => {
               },
               body: JSON.stringify({ 
                 positionId: position.id,
-                checkTpOnly: true 
+                checkTpOnly: true,
+                requireProfit: true,
               }),
             });
             
@@ -294,10 +315,10 @@ serve(async (req) => {
         settings.max_order_size || 1000
       );
 
-      // Determine profit target
+      // Determine profit target (UPDATED: $3.00 futures, $1.00 spot)
       const profitTarget = signal.tradeType === "futures"
-        ? settings.futures_profit_target || 1.0
-        : settings.spot_profit_target || 0.5;
+        ? settings.futures_profit_target || 3.00
+        : settings.spot_profit_target || 1.00;
 
       console.log(`Executing trade: ${signal.direction} ${signal.symbol} on ${signal.exchange}`);
       
