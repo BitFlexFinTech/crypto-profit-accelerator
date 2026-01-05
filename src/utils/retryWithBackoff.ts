@@ -4,14 +4,17 @@ interface RetryOptions {
   maxRetries?: number;
   baseDelay?: number;
   maxDelay?: number;
+  jitterMs?: number;
   retryableErrors?: number[];
+  onRetry?: (attempt: number, error: Error, delayMs: number) => void;
 }
 
-const DEFAULT_OPTIONS: Required<RetryOptions> = {
-  maxRetries: 3,
-  baseDelay: 1000,
-  maxDelay: 10000,
-  retryableErrors: [429, 500, 502, 503, 504],
+const DEFAULT_OPTIONS: Required<Omit<RetryOptions, 'onRetry'>> = {
+  maxRetries: 5,
+  baseDelay: 2000,
+  maxDelay: 32000,
+  jitterMs: 1000,
+  retryableErrors: [429, 500, 502, 503, 504, 520, 521, 522, 523, 524],
 };
 
 export async function retryWithBackoff<T>(
@@ -30,21 +33,26 @@ export async function retryWithBackoff<T>(
       // Check if error is retryable
       const statusCode = error?.status || error?.statusCode || error?.code;
       const isRetryable = opts.retryableErrors.includes(statusCode) || 
-                          error?.message?.includes('network') ||
-                          error?.message?.includes('timeout') ||
-                          error?.message?.includes('ECONNRESET');
+                          error?.message?.toLowerCase()?.includes('network') ||
+                          error?.message?.toLowerCase()?.includes('timeout') ||
+                          error?.message?.toLowerCase()?.includes('econnreset') ||
+                          error?.message?.toLowerCase()?.includes('econnrefused');
       
       if (!isRetryable || attempt === opts.maxRetries) {
         throw error;
       }
       
       // Calculate delay with exponential backoff and jitter
-      const delay = Math.min(
-        opts.baseDelay * Math.pow(2, attempt) + Math.random() * 1000,
-        opts.maxDelay
-      );
+      const exponentialDelay = opts.baseDelay * Math.pow(2, attempt);
+      const jitter = Math.random() * opts.jitterMs;
+      const delay = Math.min(exponentialDelay + jitter, opts.maxDelay);
       
-      console.log(`Retry attempt ${attempt + 1}/${opts.maxRetries} after ${delay}ms`);
+      console.log(`[Retry] Attempt ${attempt + 1}/${opts.maxRetries} after ${Math.round(delay)}ms`);
+      
+      if (opts.onRetry) {
+        opts.onRetry(attempt + 1, lastError, delay);
+      }
+      
       await sleep(delay);
     }
   }
@@ -68,4 +76,26 @@ export async function invokeWithRetry<T>(
     }
     return data as T;
   }, options);
+}
+
+// Check if an error indicates an IP ban
+export function isIpBanError(status: number, body: any): boolean {
+  if (status === 418) return true;
+  
+  const errorCode = String(body?.code || body?.retCode || body?.ret_code || '');
+  const errorMsg = String(body?.msg || body?.message || body?.retMsg || '').toLowerCase();
+  
+  // Binance ban codes
+  if (['-1003', '-1015', '-1021'].includes(errorCode)) return true;
+  
+  // OKX ban codes
+  if (['50001', '50014'].includes(errorCode)) return true;
+  
+  // Bybit ban codes
+  if (['10006', '10018'].includes(errorCode)) return true;
+  
+  // Message-based detection
+  if (errorMsg.includes('banned') || errorMsg.includes('ip restricted')) return true;
+  
+  return false;
 }
