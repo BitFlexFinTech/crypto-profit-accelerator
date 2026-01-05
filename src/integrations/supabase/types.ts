@@ -64,9 +64,16 @@ export type Database = {
           id: string
           is_bot_running: boolean | null
           is_paper_trading: boolean | null
+          latency_exit_threshold_binance: number | null
+          latency_exit_threshold_bybit: number | null
+          latency_exit_threshold_okx: number | null
+          latency_threshold_binance: number | null
+          latency_threshold_bybit: number | null
+          latency_threshold_okx: number | null
           max_open_positions: number | null
           max_order_size: number | null
           min_order_size: number | null
+          safe_mode_enabled: boolean | null
           spot_profit_target: number | null
           updated_at: string | null
           user_id: string | null
@@ -79,9 +86,16 @@ export type Database = {
           id?: string
           is_bot_running?: boolean | null
           is_paper_trading?: boolean | null
+          latency_exit_threshold_binance?: number | null
+          latency_exit_threshold_bybit?: number | null
+          latency_exit_threshold_okx?: number | null
+          latency_threshold_binance?: number | null
+          latency_threshold_bybit?: number | null
+          latency_threshold_okx?: number | null
           max_open_positions?: number | null
           max_order_size?: number | null
           min_order_size?: number | null
+          safe_mode_enabled?: boolean | null
           spot_profit_target?: number | null
           updated_at?: string | null
           user_id?: string | null
@@ -94,9 +108,16 @@ export type Database = {
           id?: string
           is_bot_running?: boolean | null
           is_paper_trading?: boolean | null
+          latency_exit_threshold_binance?: number | null
+          latency_exit_threshold_bybit?: number | null
+          latency_exit_threshold_okx?: number | null
+          latency_threshold_binance?: number | null
+          latency_threshold_bybit?: number | null
+          latency_threshold_okx?: number | null
           max_open_positions?: number | null
           max_order_size?: number | null
           min_order_size?: number | null
+          safe_mode_enabled?: boolean | null
           spot_profit_target?: number | null
           updated_at?: string | null
           user_id?: string | null
