@@ -508,7 +508,7 @@ export type Database = {
         | "cancelled"
         | "failed"
       position_direction: "long" | "short"
-      position_status: "open" | "closed" | "cancelled"
+      position_status: "open" | "closed" | "cancelled" | "closing"
       trade_type: "spot" | "futures"
     }
     CompositeTypes: {
@@ -661,7 +661,7 @@ export const Constants = {
         "failed",
       ],
       position_direction: ["long", "short"],
-      position_status: ["open", "closed", "cancelled"],
+      position_status: ["open", "closed", "cancelled", "closing"],
       trade_type: ["spot", "futures"],
     },
   },

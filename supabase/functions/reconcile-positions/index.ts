@@ -178,12 +178,28 @@ serve(async (req) => {
 
     console.log(`[Reconcile] Found ${positions?.length || 0} open positions`);
 
+    // Detect orphaned positions: marked closed but no exit_order_id (never sold)
+    const { data: orphanedTrades } = await supabase
+      .from("trades")
+      .select("id, symbol, status, exit_order_id")
+      .eq("status", "closed")
+      .is("exit_order_id", null)
+      .eq("is_paper_trade", false);
+    
+    if (orphanedTrades && orphanedTrades.length > 0) {
+      console.warn(`[Reconcile] ⚠️ ORPHAN ALERT: ${orphanedTrades.length} trades marked closed but never sold!`);
+      for (const orphan of orphanedTrades) {
+        console.warn(`[Reconcile] Orphaned: ${orphan.symbol} (trade: ${orphan.id})`);
+      }
+    }
+
     if (!positions || positions.length === 0) {
       return new Response(
         JSON.stringify({
           success: true,
-          summary: { total_positions: 0, matched: 0, mismatched: 0, fixed: 0 },
+          summary: { total_positions: 0, matched: 0, mismatched: 0, fixed: 0, orphaned: orphanedTrades?.length || 0 },
           mismatches: [],
+          orphanedTrades: orphanedTrades || [],
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -331,8 +347,10 @@ serve(async (req) => {
           matched,
           mismatched: mismatches.length,
           fixed,
+          orphaned: orphanedTrades?.length || 0,
         },
         mismatches,
+        orphanedTrades: orphanedTrades || [],
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

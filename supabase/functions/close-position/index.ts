@@ -663,21 +663,29 @@ serve(async (req) => {
     console.log("Position ID:", positionId);
     console.log("Require Profit:", requireProfit);
 
-    // Atomically update position to 'closed' to prevent race conditions
+    // Atomically update position to 'closing' to prevent race conditions
+    // Use intermediate status - only set 'closed' AFTER successful exit order
     const { data: position, error: claimError } = await supabase
       .from("positions")
-      .update({ status: "closed" as const })
+      .update({ status: "closing" })
       .eq("id", positionId)
       .eq("status", "open")
       .select("*")
       .single();
 
     if (claimError || !position) {
-      console.log("Position already closed or not found:", positionId);
+      // Check if already closing or closed
+      const { data: existingPos } = await supabase
+        .from("positions")
+        .select("status")
+        .eq("id", positionId)
+        .single();
+      
+      console.log("Position already closing/closed or not found:", positionId, "status:", existingPos?.status);
       return new Response(JSON.stringify({
         success: true,
         alreadyClosed: true,
-        message: "Position was already closed",
+        message: "Position was already closed or is being closed",
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -748,9 +756,9 @@ serve(async (req) => {
       console.log(`Actual Net PnL: $${actualNetPnL.toFixed(4)}, Required: $${profitTarget.toFixed(2)}`);
       
       if (actualNetPnL < profitTarget) {
-        console.log("=== PROFIT TARGET NOT MET - BLOCKING CLOSE ===");
+        console.log("=== PROFIT TARGET NOT MET - REVERTING TO OPEN ===");
         
-        // Update position with current calculated PnL
+        // Revert position back to open with current calculated PnL
         await supabase
           .from("positions")
           .update({ 
@@ -833,8 +841,8 @@ serve(async (req) => {
     }
     
     // For live trades, if exit fails, revert position to open
-    if (!isPaperTrade && !exitResult.isLive && exitResult.error) {
-      console.error("=== LIVE EXIT FAILED - REVERTING POSITION ===");
+    if (!exitResult.orderId && exitResult.error && !exitResult.noBalance) {
+      console.error("=== EXIT FAILED - REVERTING POSITION TO OPEN ===");
       await supabase
         .from("positions")
         .update({ 
