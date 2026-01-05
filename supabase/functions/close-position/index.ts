@@ -586,22 +586,21 @@ async function placeExitOrder(
     
     console.log(`[Binance] Balance check: ${baseAsset} = ${balanceResult.balance}, need ${quantity}`);
     
-    if (balanceResult.balance < quantity * 0.9) { // 90% threshold for rounding differences
-      console.warn(`[Binance] INSUFFICIENT BALANCE: Have ${balanceResult.balance}, need ${quantity}`);
-      
-      if (balanceResult.balance < 0.0001) {
-        // Asset is completely gone - position was already closed elsewhere
-        return {
-          orderId: "ALREADY-CLOSED-NO-BALANCE",
-          executedPrice: currentPrice,
-          isLive: false,
-          noBalance: true,
-          error: `No ${baseAsset} balance found - position may have been closed manually on exchange`
-        };
-      }
-      
-      // Use actual available balance instead
-      console.log(`[Binance] Using actual balance: ${balanceResult.balance} instead of ${quantity}`);
+    // If we have less than 10% of needed, treat as no balance (already sold)
+    if (balanceResult.balance < quantity * 0.1) {
+      console.warn(`[Binance] ASSET GONE: Have ${balanceResult.balance}, need ${quantity}`);
+      return {
+        orderId: "ALREADY-CLOSED-NO-BALANCE",
+        executedPrice: currentPrice,
+        isLive: false,
+        noBalance: true,
+        error: `No ${baseAsset} balance found - position may have been closed manually on exchange`
+      };
+    }
+    
+    // ALWAYS use actual balance if it's less than DB quantity (handles rounding/partial fills)
+    if (balanceResult.balance < quantity) {
+      console.log(`[Binance] Using actual balance: ${balanceResult.balance} instead of DB quantity: ${quantity}`);
       quantity = balanceResult.balance;
     }
   }
