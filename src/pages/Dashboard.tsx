@@ -12,6 +12,10 @@ import { RateLimitStatusPanel } from '@/components/dashboard/cards/RateLimitStat
 import { TradeExecutionSpeedPanel } from '@/components/dashboard/cards/TradeExecutionSpeedPanel';
 import { SafeModeOverlay } from '@/components/dashboard/SafeModeOverlay';
 import { VPSStatusPanel } from '@/components/dashboard/cards/VPSStatusPanel';
+import { VPSAutoScalingPanel } from '@/components/dashboard/cards/VPSAutoScalingPanel';
+import { VPSDeploymentHistory } from '@/components/dashboard/cards/VPSDeploymentHistory';
+import { VPSLatencyChart } from '@/components/dashboard/cards/VPSLatencyChart';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function DashboardPage() {
   return (
@@ -57,18 +61,42 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Right Panel - Trade Execution Log + VPS Status + Performance */}
-        <div className="w-64 flex-shrink-0 border-l border-border overflow-hidden flex flex-col">
+        {/* Right Panel - Trade Execution Log + VPS Monitoring */}
+        <div className="w-72 flex-shrink-0 border-l border-border overflow-hidden flex flex-col">
           <div className="flex-1 min-h-0 overflow-hidden">
             <TradeExecutionLogPanel />
           </div>
-          <div className="h-36 border-t border-border overflow-hidden">
-            <VPSStatusPanel />
+          
+          {/* VPS Monitoring Tabs */}
+          <div className="flex-shrink-0 border-t border-border overflow-hidden">
+            <Tabs defaultValue="status" className="h-full">
+              <TabsList className="w-full grid grid-cols-4 h-7 rounded-none border-b border-border bg-transparent">
+                <TabsTrigger value="status" className="text-[10px] h-6 rounded-none data-[state=active]:bg-muted">Status</TabsTrigger>
+                <TabsTrigger value="latency" className="text-[10px] h-6 rounded-none data-[state=active]:bg-muted">Latency</TabsTrigger>
+                <TabsTrigger value="scaling" className="text-[10px] h-6 rounded-none data-[state=active]:bg-muted">Scaling</TabsTrigger>
+                <TabsTrigger value="history" className="text-[10px] h-6 rounded-none data-[state=active]:bg-muted">History</TabsTrigger>
+              </TabsList>
+              <div className="h-[280px] overflow-auto">
+                <TabsContent value="status" className="mt-0 p-1">
+                  <VPSStatusPanel />
+                </TabsContent>
+                <TabsContent value="latency" className="mt-0 p-1">
+                  <VPSLatencyChart />
+                </TabsContent>
+                <TabsContent value="scaling" className="mt-0 p-1">
+                  <VPSAutoScalingPanel />
+                </TabsContent>
+                <TabsContent value="history" className="mt-0 p-1">
+                  <VPSDeploymentHistory />
+                </TabsContent>
+              </div>
+            </Tabs>
           </div>
-          <div className="h-32 border-t border-border overflow-hidden">
+          
+          <div className="h-28 border-t border-border overflow-hidden">
             <RateLimitStatusPanel />
           </div>
-          <div className="h-36 border-t border-border overflow-hidden">
+          <div className="h-32 border-t border-border overflow-hidden">
             <TradeExecutionSpeedPanel />
           </div>
         </div>

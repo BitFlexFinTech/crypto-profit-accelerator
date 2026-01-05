@@ -18,6 +18,12 @@ export interface VPSDeployment {
   created_at: string | null;
   updated_at: string | null;
   latency_ms?: number | null;
+  // History tracking fields
+  terminated_at: string | null;
+  total_uptime_seconds: number | null;
+  total_trades_executed: number | null;
+  total_cost_incurred: number | null;
+  termination_reason: string | null;
 }
 
 export function useVPSDeployments() {
