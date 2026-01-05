@@ -534,6 +534,11 @@ export type Database = {
           region: string
           region_city: string | null
           status: string | null
+          terminated_at: string | null
+          termination_reason: string | null
+          total_cost_incurred: number | null
+          total_trades_executed: number | null
+          total_uptime_seconds: number | null
           updated_at: string | null
           user_id: string | null
           websocket_connected: boolean | null
@@ -551,6 +556,11 @@ export type Database = {
           region: string
           region_city?: string | null
           status?: string | null
+          terminated_at?: string | null
+          termination_reason?: string | null
+          total_cost_incurred?: number | null
+          total_trades_executed?: number | null
+          total_uptime_seconds?: number | null
           updated_at?: string | null
           user_id?: string | null
           websocket_connected?: boolean | null
@@ -568,10 +578,92 @@ export type Database = {
           region?: string
           region_city?: string | null
           status?: string | null
+          terminated_at?: string | null
+          termination_reason?: string | null
+          total_cost_incurred?: number | null
+          total_trades_executed?: number | null
+          total_uptime_seconds?: number | null
           updated_at?: string | null
           user_id?: string | null
           websocket_connected?: boolean | null
           websocket_endpoint?: string | null
+        }
+        Relationships: []
+      }
+      vps_latency_logs: {
+        Row: {
+          exchange: string | null
+          id: string
+          latency_ms: number
+          recorded_at: string | null
+          vps_deployment_id: string | null
+        }
+        Insert: {
+          exchange?: string | null
+          id?: string
+          latency_ms: number
+          recorded_at?: string | null
+          vps_deployment_id?: string | null
+        }
+        Update: {
+          exchange?: string | null
+          id?: string
+          latency_ms?: number
+          recorded_at?: string | null
+          vps_deployment_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vps_latency_logs_vps_deployment_id_fkey"
+            columns: ["vps_deployment_id"]
+            isOneToOne: false
+            referencedRelation: "vps_deployments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vps_scaling_rules: {
+        Row: {
+          cooldown_minutes: number | null
+          created_at: string | null
+          id: string
+          is_enabled: boolean | null
+          last_scale_at: string | null
+          max_instances: number | null
+          provider: string | null
+          region: string | null
+          scale_up_count: number | null
+          updated_at: string | null
+          user_id: string | null
+          volatility_threshold: number | null
+        }
+        Insert: {
+          cooldown_minutes?: number | null
+          created_at?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          last_scale_at?: string | null
+          max_instances?: number | null
+          provider?: string | null
+          region?: string | null
+          scale_up_count?: number | null
+          updated_at?: string | null
+          user_id?: string | null
+          volatility_threshold?: number | null
+        }
+        Update: {
+          cooldown_minutes?: number | null
+          created_at?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          last_scale_at?: string | null
+          max_instances?: number | null
+          provider?: string | null
+          region?: string | null
+          scale_up_count?: number | null
+          updated_at?: string | null
+          user_id?: string | null
+          volatility_threshold?: number | null
         }
         Relationships: []
       }

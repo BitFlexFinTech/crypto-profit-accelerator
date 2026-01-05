@@ -116,6 +116,19 @@ serve(async (req) => {
               const latency = now - message.timestamp;
               const conn = connectedVPS.get(deploymentId)!;
               conn.latencyMs = latency;
+              
+              // Log latency to database for monitoring graph
+              try {
+                await supabase
+                  .from('vps_latency_logs')
+                  .insert({
+                    vps_deployment_id: deploymentId,
+                    latency_ms: latency,
+                    exchange: (message.data as { exchange?: string })?.exchange || null,
+                  });
+              } catch (logError) {
+                console.warn('[hft-ws] Failed to log latency:', logError);
+              }
             }
             break;
 

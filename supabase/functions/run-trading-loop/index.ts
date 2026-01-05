@@ -132,6 +132,74 @@ serve(async (req) => {
       console.warn("Reconciliation failed:", e);
     }
 
+    // STEP 0.6: CHECK AUTO-SCALING RULES
+    console.log("Checking VPS auto-scaling rules...");
+    try {
+      const { data: scalingRule } = await supabase
+        .from("vps_scaling_rules")
+        .select("*")
+        .eq("is_enabled", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (scalingRule) {
+        // Calculate current market volatility (simple: check price changes across pairs)
+        const volatilityThreshold = scalingRule.volatility_threshold || 3.0;
+        const cooldownMinutes = scalingRule.cooldown_minutes || 30;
+        const maxInstances = scalingRule.max_instances || 3;
+        const lastScaleAt = scalingRule.last_scale_at ? new Date(scalingRule.last_scale_at).getTime() : 0;
+        const cooldownMs = cooldownMinutes * 60 * 1000;
+        
+        // Check if cooldown has passed
+        if (now.getTime() - lastScaleAt > cooldownMs) {
+          // Get current VPS count
+          const { data: vpsInstances } = await supabase
+            .from("vps_deployments")
+            .select("id")
+            .eq("status", "running");
+          
+          const currentInstances = vpsInstances?.length || 0;
+          
+          if (currentInstances < maxInstances) {
+            // Simple volatility check based on recent trade performance
+            // In production, this would analyze actual price data
+            const highVolatilityDetected = false; // Placeholder - would check actual market data
+            
+            if (highVolatilityDetected) {
+              console.log(`High volatility detected (>${volatilityThreshold}%), triggering auto-scale...`);
+              
+              // Trigger VPS deployment
+              try {
+                await fetch(`${supabaseUrl}/functions/v1/deploy-vps`, {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Bearer ${supabaseKey}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    provider: scalingRule.provider || "digitalocean",
+                    region: scalingRule.region || "nyc1",
+                  }),
+                });
+                
+                // Update last scale timestamp
+                await supabase
+                  .from("vps_scaling_rules")
+                  .update({ last_scale_at: now.toISOString() })
+                  .eq("id", scalingRule.id);
+                
+                result.actions.push("Auto-scaled: Deployed new VPS instance");
+              } catch (deployError) {
+                console.warn("Auto-scale deployment failed:", deployError);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Auto-scaling check failed:", e);
+    }
+
     // STEP 0.5: RETRY FAILED TP ORDERS
     console.log("Retrying failed TP orders...");
     try {
