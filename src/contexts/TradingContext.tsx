@@ -1342,13 +1342,25 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Force close a phantom position (DB cleanup only - no exchange interaction)
+  // STRICT RULE: Only allowed for verified MISSING positions (phantoms)
   const forceClosePosition = useCallback(async (positionId: string) => {
     try {
+      // Get current verification status
+      const verification = positionVerifications[positionId];
+      
+      // STRICT: Only allow force-close for verified MISSING positions
+      if (verification?.status !== 'MISSING') {
+        console.error(`Force close blocked: Position ${positionId} is not verified as MISSING (status: ${verification?.status || 'unknown'})`);
+        throw new Error('Force close only allowed for verified phantom positions. Run "Verify" first to confirm position is missing from exchange.');
+      }
+      
       // Directly mark position as closed in DB - no exchange call
       const { error } = await supabase
         .from('positions')
         .update({ 
-          status: 'closed', 
+          status: 'closed',
+          exit_order_id: 'PHANTOM_CLEANUP',
+          reconciliation_note: 'Removed as phantom - verified missing from exchange',
           updated_at: new Date().toISOString(),
         })
         .eq('id', positionId);
@@ -1363,12 +1375,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         return updated;
       });
       
-      console.log(`Force closed phantom position: ${positionId}`);
+      console.log(`Force closed verified phantom position: ${positionId}`);
     } catch (error) {
       console.error('Error force closing position:', error);
       throw error;
     }
-  }, []);
+  }, [positionVerifications]);
 
   // Sync balances
   const syncBalances = useCallback(async () => {

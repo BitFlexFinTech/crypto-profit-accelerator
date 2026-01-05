@@ -470,37 +470,22 @@ serve(async (req) => {
     if (autoFix && mismatches.length > 0) {
       for (const mismatch of mismatches) {
         if (mismatch.type === "MISSING") {
-          // Mark position as closed
+          // STRICT RULE: NEVER auto-close positions - only flag as stuck
+          // Positions must ONLY close when profit target is confirmed hit
+          console.warn(`[Reconcile] MISSING position ${mismatch.position_id} (${mismatch.symbol}) - flagging as STUCK, NOT closing`);
+          
           const { error: updateError } = await supabase
             .from("positions")
             .update({
-              status: "closed",
-              exit_order_id: "RECONCILED",
+              take_profit_status: "stuck",
+              reconciliation_note: `Position not found on ${mismatch.exchange}. Exchange balance: ${mismatch.exchange_balance}. Needs manual verification - DO NOT auto-close.`,
               updated_at: new Date().toISOString(),
             })
             .eq("id", mismatch.position_id);
 
           if (!updateError) {
-            // Also update the linked trade if exists
-            const { data: pos } = await supabase
-              .from("positions")
-              .select("trade_id")
-              .eq("id", mismatch.position_id)
-              .single();
-
-            if (pos?.trade_id) {
-              await supabase
-                .from("trades")
-                .update({
-                  status: "closed",
-                  exit_order_id: "RECONCILED",
-                  closed_at: new Date().toISOString(),
-                })
-                .eq("id", pos.trade_id);
-            }
-
             fixed++;
-            console.log(`[Reconcile] Fixed MISSING position ${mismatch.position_id}`);
+            console.log(`[Reconcile] Flagged MISSING position ${mismatch.position_id} as STUCK (not closed)`);
           }
         } else if (mismatch.type === "QUANTITY_MISMATCH") {
           // Auto-update DB quantity to match exchange
