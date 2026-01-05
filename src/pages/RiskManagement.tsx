@@ -26,11 +26,8 @@ const RiskManagement = () => {
   
   const todayRealizedPnL = todayTrades.reduce((sum, t) => sum + (t.net_profit || 0), 0);
   
-  // Calculate unrealized P&L from open positions
-  const unrealizedPnL = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
-  
-  // Total today's P&L (realized + unrealized)
-  const totalTodayPnL = todayRealizedPnL + unrealizedPnL;
+  // Total today's P&L (realized only - no estimated PnL)
+  const totalTodayPnL = todayRealizedPnL;
   
   // Daily loss limit from settings
   const dailyLossLimit = settings?.daily_loss_limit || 40;
@@ -188,18 +185,16 @@ const RiskManagement = () => {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-3 gap-4">
             <div className="text-center p-4 bg-muted/50 rounded-lg">
-              <p className="text-sm text-muted-foreground">Realized P&L</p>
+              <p className="text-sm text-muted-foreground">Today's Realized P&L</p>
               <p className={`text-2xl font-bold ${todayRealizedPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
                 {todayRealizedPnL >= 0 ? '+' : ''}{todayRealizedPnL.toFixed(2)}
               </p>
               <p className="text-xs text-muted-foreground">{todayTrades.length} closed trades</p>
             </div>
             <div className="text-center p-4 bg-muted/50 rounded-lg">
-              <p className="text-sm text-muted-foreground">Unrealized P&L</p>
-              <p className={`text-2xl font-bold ${unrealizedPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
-                {unrealizedPnL >= 0 ? '+' : ''}{unrealizedPnL.toFixed(2)}
-              </p>
-              <p className="text-xs text-muted-foreground">{positions.length} open positions</p>
+              <p className="text-sm text-muted-foreground">Open Positions</p>
+              <p className="text-2xl font-bold text-foreground">{positions.length}</p>
+              <p className="text-xs text-muted-foreground">Awaiting profit target</p>
             </div>
             <div className="text-center p-4 bg-muted/50 rounded-lg">
               <p className="text-sm text-muted-foreground">Daily Loss Limit</p>

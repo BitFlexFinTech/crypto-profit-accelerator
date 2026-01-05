@@ -85,9 +85,9 @@ export function StatsCards({ compact = false }: StatsCardsProps) {
         </div>
         <div className="flex items-center gap-1.5 bg-secondary/50 rounded px-2 py-1">
           <Activity className="h-3 w-3 text-muted-foreground" />
-          <span className="text-xs text-muted-foreground">Unreal:</span>
-          <span className={cn("font-mono text-sm font-medium", unrealizedPnL >= 0 ? "text-primary" : "text-destructive")}>
-            {unrealizedPnL >= 0 ? '+' : ''}${unrealizedPnL.toFixed(2)}
+          <span className="text-xs text-muted-foreground">Equity:</span>
+          <span className="font-mono text-sm font-medium text-foreground">
+            ${totalBalance.toFixed(0)}
           </span>
         </div>
         <div className="flex items-center gap-1.5 bg-secondary/50 rounded px-2 py-1">
@@ -137,11 +137,13 @@ export function StatsCards({ compact = false }: StatsCardsProps) {
       />
       
       <StatCard
-        title="Unrealized P&L"
-        value={`${unrealizedPnL >= 0 ? '+' : ''}$${unrealizedPnL.toFixed(2)}`}
+        title="Live Equity"
+        value={`$${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+        subtitle="From exchanges"
         icon={Activity}
-        trend={unrealizedPnL >= 0 ? 'up' : 'down'}
+        trend="neutral"
         showLive
+        syncTime={secondsAgo}
       />
       
       <StatCard
