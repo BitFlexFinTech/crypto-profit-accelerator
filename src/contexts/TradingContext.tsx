@@ -761,26 +761,48 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
-    // Calculate total available USDT across all exchanges
-    const totalAvailableUSDT = currentBalances
-      .filter(b => b.currency === 'USDT')
-      .reduce((sum, b) => sum + (b.available || 0), 0);
-
-    // Calculate currently locked in positions
-    const lockedInPositions = currentPositions.reduce((sum, p) => sum + (p.order_size_usd || 0), 0);
-    
-    // Available for new trades
-    const availableForTrades = totalAvailableUSDT - lockedInPositions;
-
-    // Find exchange
-    let targetExchange = currentExchanges.find(e => e.exchange === signal.exchange && e.is_connected);
+    // ⚡ STRICT RULE: Find the exact exchange from signal - NO FALLBACK
+    const targetExchange = currentExchanges.find(e => e.exchange === signal.exchange && e.is_connected && e.is_enabled);
     if (!targetExchange) {
-      targetExchange = currentExchanges.find(e => e.is_connected);
-    }
-    if (!targetExchange) {
-      appendExecutionLog({ type: 'BLOCKED', message: 'No connected exchange available', symbol: signal.symbol });
+      appendExecutionLog({ 
+        type: 'BLOCKED', 
+        message: `Exchange ${signal.exchange} not connected or not enabled`,
+        symbol: signal.symbol,
+      });
       return false;
     }
+
+    // Validate exchange supports the trade type
+    if (signal.tradeType === 'futures' && !targetExchange.futures_enabled) {
+      appendExecutionLog({ 
+        type: 'BLOCKED', 
+        message: `Futures not enabled on ${signal.exchange}`,
+        symbol: signal.symbol,
+      });
+      return false;
+    }
+    if (signal.tradeType === 'spot' && !targetExchange.spot_enabled) {
+      appendExecutionLog({ 
+        type: 'BLOCKED', 
+        message: `Spot not enabled on ${signal.exchange}`,
+        symbol: signal.symbol,
+      });
+      return false;
+    }
+
+    // ⚡ PER-EXCHANGE BALANCE: Calculate available USDT for the TARGET exchange only
+    const exchangeBalances = currentBalances.filter(b => 
+      b.currency === 'USDT' && b.exchange_id === targetExchange.id
+    );
+    const exchangeAvailableUSDT = exchangeBalances.reduce((sum, b) => sum + (b.available || 0), 0);
+
+    // Calculate locked in positions FOR THIS EXCHANGE only
+    const lockedInExchangePositions = currentPositions
+      .filter(p => p.exchange_id === targetExchange.id)
+      .reduce((sum, p) => sum + (p.order_size_usd || 0), 0);
+    
+    // Available for new trades on this exchange
+    const availableForTrades = exchangeAvailableUSDT - lockedInExchangePositions;
 
     // Calculate order size - use all available balance optimally
     // Target: Use up to 25% of available per trade, but respect min/max settings
@@ -987,8 +1009,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       const thresholdKey = (currentSettings.ai_aggressiveness || 'balanced') as keyof typeof THRESHOLDS;
       const { confidence: confidenceThreshold, score: scoreThreshold } = THRESHOLDS[thresholdKey] || THRESHOLDS.balanced;
 
-      // Build set of symbols already in position (to avoid duplicates)
-      const positionSymbols = new Set(currentPositions.map(p => p.symbol));
+      // Build set of (exchange:symbol) already in position to allow SAME symbol on DIFFERENT exchanges
+      const positionKeys = new Set(currentPositions.map(p => {
+        // Get exchange name from exchange_id
+        const exchangeName = currentExchanges.find(e => e.id === p.exchange_id)?.exchange || 'unknown';
+        return `${exchangeName}:${p.symbol}`;
+      }));
 
       // ⚡ VELOCITY OPTIMIZATION: Sort signals by speed score (faster pairs first)
       const velocitySortedSignals = [...currentSignals]
@@ -1004,11 +1030,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         for (const signal of velocitySortedSignals) {
           if (tradesExecutedThisCycle >= maxTradesToExecute) break;
 
-          // Skip if we already have a position on this symbol
-          if (positionSymbols.has(signal.symbol)) {
+          // Skip if we already have a position on this (exchange:symbol) combination
+          const signalPositionKey = `${signal.exchange}:${signal.symbol}`;
+          if (positionKeys.has(signalPositionKey)) {
             appendExecutionLog({
               type: 'BLOCKED',
-              message: `Already have open position`,
+              message: `Already have open position on ${signal.exchange}`,
               symbol: signal.symbol,
             });
             continue;
@@ -1052,7 +1079,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           const success = await executeTradeFromSignal(signal);
           if (success) {
             tradesExecutedThisCycle++;
-            positionSymbols.add(signal.symbol); // Prevent duplicate in same cycle
+            positionKeys.add(signalPositionKey); // Prevent duplicate in same cycle (per exchange:symbol)
             lastExecutedMapRef.current[signalKey] = Date.now();
           }
         }
