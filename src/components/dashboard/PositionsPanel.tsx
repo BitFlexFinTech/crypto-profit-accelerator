@@ -542,11 +542,25 @@ export function PositionsPanel() {
                                 )}
                                 Close
                               </Button>
-                              {/* Show stuck/error TP status badge */}
+                              {/* Show stuck/error TP status badge with retry button */}
                               {(position.take_profit_status as string) === 'stuck' && (
-                                <Badge variant="outline" className="text-[8px] px-0.5 py-0 bg-orange-500/10 text-orange-400 border-orange-500/30">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={async () => {
+                                    try {
+                                      toast.info('Retrying stuck position...');
+                                      await reconcilePositions(true);
+                                      toast.success('Position reconciled');
+                                    } catch {
+                                      toast.error('Retry failed');
+                                    }
+                                  }}
+                                  className="h-5 px-1 text-[8px] gap-0.5 bg-orange-500/10 text-orange-400 border-orange-500/30 hover:bg-orange-500/20"
+                                >
+                                  <RefreshCcw className="h-2 w-2" />
                                   STUCK
-                                </Badge>
+                                </Button>
                               )}
                               {(position.take_profit_status as string) === 'error' && (
                                 <Badge variant="outline" className="text-[8px] px-0.5 py-0 bg-red-500/10 text-red-400 border-red-500/30">

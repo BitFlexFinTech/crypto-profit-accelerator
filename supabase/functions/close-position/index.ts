@@ -71,10 +71,42 @@ const QUANTITY_PRECISION: Record<string, number> = {
   'SEI': 0,    // stepSize: 1
 };
 
+// OKX SWAP contract sizes (1 contract = X base asset)
+// For OKX futures, sz is the NUMBER OF CONTRACTS, not quantity
+const OKX_CONTRACT_SIZE: Record<string, number> = {
+  'BTC': 0.01,   // 1 contract = 0.01 BTC
+  'ETH': 0.1,    // 1 contract = 0.1 ETH
+  'SOL': 1,      // 1 contract = 1 SOL
+  'DOT': 10,     // 1 contract = 10 DOT
+  'XRP': 100,    // 1 contract = 100 XRP
+  'DOGE': 1000,  // 1 contract = 1000 DOGE
+  'ADA': 100,    // 1 contract = 100 ADA
+  'LINK': 1,     // 1 contract = 1 LINK
+  'AVAX': 1,     // 1 contract = 1 AVAX
+  'MATIC': 100,  // 1 contract = 100 MATIC
+  'LTC': 0.1,    // 1 contract = 0.1 LTC
+  'BNB': 0.1,    // 1 contract = 0.1 BNB
+  'ATOM': 1,     // 1 contract = 1 ATOM
+  'NEAR': 10,    // 1 contract = 10 NEAR
+  'UNI': 1,      // 1 contract = 1 UNI
+  'OP': 10,      // 1 contract = 10 OP
+  'ARB': 10,     // 1 contract = 10 ARB
+  'SUI': 10,     // 1 contract = 10 SUI
+  'SEI': 100,    // 1 contract = 100 SEI
+};
+
 // Format quantity to proper precision for exchange LOT_SIZE filter
-function formatQuantity(quantity: number, symbol: string): string {
+function formatQuantity(quantity: number, symbol: string, exchange?: string, tradeType?: "spot" | "futures"): string {
   // Extract base asset from symbol (e.g., "BTC" from "BTC/USDT" or "BTCUSDT")
   const baseAsset = symbol.replace(/[-\/]?(USDT|USDC|BUSD|USD).*$/i, '').toUpperCase();
+  
+  // OKX SWAP contracts: sz is number of contracts, not raw quantity
+  if (exchange === 'okx' && tradeType === 'futures') {
+    const contractSize = OKX_CONTRACT_SIZE[baseAsset] ?? 1;
+    const numContracts = Math.floor(quantity / contractSize);
+    console.log(`[formatQuantity] OKX SWAP EXIT ${baseAsset}: ${quantity} / ${contractSize} = ${numContracts} contracts`);
+    return numContracts.toString();
+  }
   
   // Get precision from mapping, default to 2 decimals for unknown assets
   const precision = QUANTITY_PRECISION[baseAsset] ?? 2;
@@ -283,7 +315,7 @@ async function placeOKXMarketOrder(
       tdMode: tradeType === "futures" ? "cross" : "cash",
       side: side.toLowerCase(),
       ordType: "market",
-      sz: formatQuantity(quantity, symbol),
+      sz: formatQuantity(quantity, symbol, "okx", tradeType),
     };
 
     // Critical for futures exits: ensure we only reduce an existing position.
