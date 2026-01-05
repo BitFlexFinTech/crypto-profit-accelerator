@@ -60,7 +60,7 @@ interface HFTState {
 // ============================================
 let SAFE_MODE_LATENCY_THRESHOLD = 1200; // ms - enter safe mode if RTT > this
 let SAFE_MODE_EXIT_THRESHOLD = 800; // ms - exit safe mode if RTT < this
-const CONSECUTIVE_HIGH_LATENCY_TRIGGER = 5; // consecutive checks before safe mode
+const CONSECUTIVE_HIGH_LATENCY_TRIGGER = 10; // consecutive checks before safe mode (was 5)
 const CONSECUTIVE_LOW_LATENCY_EXIT = 3; // consecutive checks before exiting safe mode
 const FAT_FINGER_DEVIATION_PERCENT = 2; // max price deviation from market
 const STALE_RTT_WINDOW_MS = 20000; // 20s - ignore RTT samples older than this (2.5x ping interval)
@@ -111,11 +111,17 @@ class HFTCore {
   private stateChangeCallbacks: Set<(state: HFTState) => void> = new Set();
   
   // Dynamic latency thresholds (configurable per exchange)
+  // Binance uses REST which is inherently slower than WebSocket ping/pong
   private latencyThresholds: LatencyThresholdConfig = {
-    binance: { enter: 1200, exit: 800 },
+    binance: { enter: 2500, exit: 1500 }, // REST is slower, raised from 1200/800
     okx: { enter: 1200, exit: 800 },
     bybit: { enter: 1200, exit: 800 },
     enabled: true,
+  };
+  
+  // RTT smoothing buffer (3-sample moving average)
+  private rttSmoothingBuffer: Record<string, number[]> = {
+    binance: [], okx: [], bybit: [],
   };
   
   private constructor() {
@@ -387,11 +393,25 @@ class HFTCore {
     }, 2000);
   }
   
+  // Get smoothed RTT using 3-sample moving average
+  private getSmoothedRTT(exchange: ExchangeName, newRtt: number): number {
+    const buffer = this.rttSmoothingBuffer[exchange] || [];
+    buffer.push(newRtt);
+    if (buffer.length > 3) buffer.shift(); // Keep last 3 samples
+    this.rttSmoothingBuffer[exchange] = buffer;
+    
+    // Return average
+    return Math.round(buffer.reduce((a, b) => a + b, 0) / buffer.length);
+  }
+  
   // Record RTT measurement for stats
   private recordRTT(exchange: ExchangeName, rtt: number): void {
+    // Apply smoothing before recording
+    const smoothedRtt = this.getSmoothedRTT(exchange, rtt);
+    
     this.rttHistory.push({
       timestamp: Date.now(),
-      rtt,
+      rtt: smoothedRtt,
       exchange,
     });
     
