@@ -488,6 +488,49 @@ async function cancelExchangeOrder(
 }
 
 // ============================================
+// BINANCE - GET ASSET BALANCE
+// ============================================
+async function getBinanceBalance(
+  credentials: ExchangeCredentials,
+  asset: string,
+  tradeType: "spot" | "futures"
+): Promise<{ balance: number; error?: string }> {
+  try {
+    const timestamp = Date.now();
+    const params = new URLSearchParams({ timestamp: timestamp.toString() });
+    
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(params.toString())
+      .digest("hex");
+    
+    const baseUrl = tradeType === "futures"
+      ? "https://fapi.binance.com/fapi/v2/balance"
+      : "https://api.binance.com/api/v3/account";
+    
+    const response = await fetch(`${baseUrl}?${params}&signature=${signature}`, {
+      method: "GET",
+      headers: { "X-MBX-APIKEY": credentials.apiKey },
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return { balance: 0, error: data.msg || `API error: ${response.status}` };
+    }
+    
+    if (tradeType === "futures") {
+      const assetBalance = data.find((b: { asset: string }) => b.asset === asset);
+      return { balance: parseFloat(assetBalance?.availableBalance || "0") };
+    } else {
+      const assetBalance = data.balances?.find((b: { asset: string }) => b.asset === asset);
+      return { balance: parseFloat(assetBalance?.free || "0") };
+    }
+  } catch (error) {
+    return { balance: 0, error: error instanceof Error ? error.message : "Unknown error" };
+  }
+}
+
+// ============================================
 // UNIFIED EXIT ORDER (MARKET)
 // ============================================
 async function placeExitOrder(
@@ -503,7 +546,7 @@ async function placeExitOrder(
   tradeType: "spot" | "futures",
   isPaperTrade: boolean,
   currentPrice: number
-): Promise<{ orderId: string; executedPrice: number; isLive: boolean; error?: string }> {
+): Promise<{ orderId: string; executedPrice: number; isLive: boolean; error?: string; noBalance?: boolean }> {
   console.log(`[${exchange.exchange}] Exit order: ${side} ${quantity} ${symbol} (Paper: ${isPaperTrade})`);
   
   if (isPaperTrade) {
@@ -535,6 +578,33 @@ async function placeExitOrder(
     apiSecret: exchange.api_secret_encrypted,
     passphrase: exchange.passphrase_encrypted || undefined,
   };
+  
+  // CRITICAL: Check actual balance before attempting to sell
+  if (exchange.exchange === "binance" && side === "SELL") {
+    const baseAsset = symbol.replace(/[-\/]?(USDT|USDC|BUSD|USD).*$/i, '').toUpperCase();
+    const balanceResult = await getBinanceBalance(credentials, baseAsset, tradeType);
+    
+    console.log(`[Binance] Balance check: ${baseAsset} = ${balanceResult.balance}, need ${quantity}`);
+    
+    if (balanceResult.balance < quantity * 0.9) { // 90% threshold for rounding differences
+      console.warn(`[Binance] INSUFFICIENT BALANCE: Have ${balanceResult.balance}, need ${quantity}`);
+      
+      if (balanceResult.balance < 0.0001) {
+        // Asset is completely gone - position was already closed elsewhere
+        return {
+          orderId: "ALREADY-CLOSED-NO-BALANCE",
+          executedPrice: currentPrice,
+          isLive: false,
+          noBalance: true,
+          error: `No ${baseAsset} balance found - position may have been closed manually on exchange`
+        };
+      }
+      
+      // Use actual available balance instead
+      console.log(`[Binance] Using actual balance: ${balanceResult.balance} instead of ${quantity}`);
+      quantity = balanceResult.balance;
+    }
+  }
   
   let result: OrderResult;
   
@@ -725,6 +795,42 @@ serve(async (req) => {
       isPaperTrade,
       currentPrice
     );
+    
+    // Handle case where asset is no longer on exchange (already sold externally)
+    if (exitResult.noBalance) {
+      console.warn("=== NO BALANCE - CLOSING POSITION AS DATA CLEANUP ===");
+      const now = new Date().toISOString();
+      
+      // Close position in DB with a note - asset was already sold
+      await supabase
+        .from("positions")
+        .update({ 
+          status: "closed",
+          exit_order_id: "EXTERNAL-CLOSE",
+          updated_at: now,
+        })
+        .eq("id", positionId);
+      
+      await supabase
+        .from("trades")
+        .update({
+          status: "closed",
+          closed_at: now,
+          exit_order_id: "EXTERNAL-CLOSE",
+          net_profit: 0, // Unknown - closed externally
+          gross_profit: 0,
+        })
+        .eq("id", position.trade_id);
+      
+      return new Response(JSON.stringify({
+        success: true,
+        warning: "Position closed in database - asset was already sold on exchange",
+        noBalance: true,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     
     // For live trades, if exit fails, revert position to open
     if (!isPaperTrade && !exitResult.isLive && exitResult.error) {
