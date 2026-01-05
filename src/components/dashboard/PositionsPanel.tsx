@@ -359,6 +359,31 @@ export function PositionsPanel() {
                                 )}
                                 Close
                               </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={async () => {
+                                  if (!confirm(`Force close ${position.symbol}? This removes it from DB without exchange interaction.`)) return;
+                                  setForceClosingId(position.id);
+                                  try {
+                                    await forceClosePosition(position.id);
+                                    toast.success('Position force-closed');
+                                  } catch {
+                                    toast.error('Failed to force close');
+                                  } finally {
+                                    setForceClosingId(null);
+                                  }
+                                }}
+                                disabled={forceClosingId === position.id}
+                                className="h-5 px-1 text-[10px] text-muted-foreground hover:text-destructive"
+                                title="Force close without exchange (for stuck/phantom positions)"
+                              >
+                                {forceClosingId === position.id ? (
+                                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                ) : (
+                                  <X className="h-2.5 w-2.5" />
+                                )}
+                              </Button>
                               {!canClose && (
                                 <span className="text-[8px] text-muted-foreground whitespace-nowrap">
                                   +${(position.profit_target - position.unrealized_pnl).toFixed(2)}
