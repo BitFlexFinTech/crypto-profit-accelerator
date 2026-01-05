@@ -8,9 +8,14 @@ import { GlobalSyncButton } from '@/components/dashboard/GlobalSyncButton';
 import { RealTimePnL } from '@/components/dashboard/cards/RealTimePnL';
 import { TradeExecutionLogPanel } from '@/components/dashboard/cards/TradeExecutionLogPanel';
 import { TradeVelocityDashboard } from '@/components/dashboard/cards/TradeVelocityDashboard';
+import { RateLimitStatusPanel } from '@/components/dashboard/cards/RateLimitStatusPanel';
+import { TradeExecutionSpeedPanel } from '@/components/dashboard/cards/TradeExecutionSpeedPanel';
+import { SafeModeOverlay } from '@/components/dashboard/SafeModeOverlay';
 
 export default function DashboardPage() {
   return (
+    <>
+    <SafeModeOverlay />
     <div className="h-screen flex flex-col overflow-hidden bg-background">
       {/* Compact Header - 40px */}
       <div className="h-10 flex-shrink-0 flex items-center justify-between px-3 border-b border-border bg-card/50">
@@ -51,11 +56,20 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Right Panel - Trade Execution Log */}
-        <div className="w-64 flex-shrink-0 border-l border-border overflow-hidden">
-          <TradeExecutionLogPanel />
+        {/* Right Panel - Trade Execution Log + Performance */}
+        <div className="w-64 flex-shrink-0 border-l border-border overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <TradeExecutionLogPanel />
+          </div>
+          <div className="h-44 border-t border-border overflow-hidden">
+            <RateLimitStatusPanel />
+          </div>
+          <div className="h-48 border-t border-border overflow-hidden">
+            <TradeExecutionSpeedPanel />
+          </div>
         </div>
       </div>
     </div>
+    </>
   );
 }
