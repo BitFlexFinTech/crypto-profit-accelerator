@@ -1,5 +1,6 @@
 import { ExchangeConnections } from '@/components/settings/ExchangeConnections';
 import { TradingConfig } from '@/components/settings/TradingConfig';
+import { LatencyThresholds } from '@/components/settings/LatencyThresholds';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
@@ -22,6 +23,10 @@ export default function SettingsPage() {
           <Separator className="bg-border" />
           
           <TradingConfig />
+          
+          <Separator className="bg-border" />
+          
+          <LatencyThresholds />
         </div>
       </ScrollArea>
     </div>

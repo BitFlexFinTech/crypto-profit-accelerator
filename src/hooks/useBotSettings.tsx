@@ -31,6 +31,13 @@ export function useBotSettings() {
           spot_profit_target: Number(data.spot_profit_target),
           futures_profit_target: Number(data.futures_profit_target),
           daily_loss_limit: Number(data.daily_loss_limit),
+          latency_threshold_binance: Number(data.latency_threshold_binance ?? 1200),
+          latency_threshold_okx: Number(data.latency_threshold_okx ?? 1200),
+          latency_threshold_bybit: Number(data.latency_threshold_bybit ?? 1200),
+          latency_exit_threshold_binance: Number(data.latency_exit_threshold_binance ?? 800),
+          latency_exit_threshold_okx: Number(data.latency_exit_threshold_okx ?? 800),
+          latency_exit_threshold_bybit: Number(data.latency_exit_threshold_bybit ?? 800),
+          safe_mode_enabled: data.safe_mode_enabled ?? true,
         } as BotSettings);
       } else {
         await createDefaultSettings();
@@ -75,6 +82,13 @@ export function useBotSettings() {
         spot_profit_target: Number(data.spot_profit_target),
         futures_profit_target: Number(data.futures_profit_target),
         daily_loss_limit: Number(data.daily_loss_limit),
+        latency_threshold_binance: Number(data.latency_threshold_binance ?? 1200),
+        latency_threshold_okx: Number(data.latency_threshold_okx ?? 1200),
+        latency_threshold_bybit: Number(data.latency_threshold_bybit ?? 1200),
+        latency_exit_threshold_binance: Number(data.latency_exit_threshold_binance ?? 800),
+        latency_exit_threshold_okx: Number(data.latency_exit_threshold_okx ?? 800),
+        latency_exit_threshold_bybit: Number(data.latency_exit_threshold_bybit ?? 800),
+        safe_mode_enabled: data.safe_mode_enabled ?? true,
       } as BotSettings);
     } catch (error) {
       console.error('Error creating default settings:', error);

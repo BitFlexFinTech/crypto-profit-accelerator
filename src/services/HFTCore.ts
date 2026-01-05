@@ -56,16 +56,23 @@ interface HFTState {
 }
 
 // ============================================
-// CONSTANTS
+// CONSTANTS (default values, can be overridden via settings)
 // ============================================
-// Relaxed thresholds: OKX/Bybit ping/pong can be 500-1500ms on typical networks
-const SAFE_MODE_LATENCY_THRESHOLD = 1200; // ms - enter safe mode if RTT > this
-const SAFE_MODE_EXIT_THRESHOLD = 800; // ms - exit safe mode if RTT < this
+let SAFE_MODE_LATENCY_THRESHOLD = 1200; // ms - enter safe mode if RTT > this
+let SAFE_MODE_EXIT_THRESHOLD = 800; // ms - exit safe mode if RTT < this
 const CONSECUTIVE_HIGH_LATENCY_TRIGGER = 5; // consecutive checks before safe mode
 const CONSECUTIVE_LOW_LATENCY_EXIT = 3; // consecutive checks before exiting safe mode
 const FAT_FINGER_DEVIATION_PERCENT = 2; // max price deviation from market
 const STALE_RTT_WINDOW_MS = 20000; // 20s - ignore RTT samples older than this (2.5x ping interval)
 const SAFE_MODE_MIN_DURATION_MS = 30000; // 30s - minimum time in safe mode before auto-exit
+
+// Per-exchange thresholds (can be updated dynamically)
+interface LatencyThresholdConfig {
+  binance: { enter: number; exit: number };
+  okx: { enter: number; exit: number };
+  bybit: { enter: number; exit: number };
+  enabled: boolean;
+}
 
 // ============================================
 // HFT CORE CLASS
@@ -102,6 +109,14 @@ class HFTCore {
   
   // Callbacks for state changes
   private stateChangeCallbacks: Set<(state: HFTState) => void> = new Set();
+  
+  // Dynamic latency thresholds (configurable per exchange)
+  private latencyThresholds: LatencyThresholdConfig = {
+    binance: { enter: 1200, exit: 800 },
+    okx: { enter: 1200, exit: 800 },
+    bybit: { enter: 1200, exit: 800 },
+    enabled: true,
+  };
   
   private constructor() {
     // Initialize exchange tracking
@@ -286,12 +301,26 @@ class HFTCore {
   private startLatencyMonitoring(): void {
     // Monitor latency every 2 seconds
     setInterval(() => {
+      // Skip all monitoring if Safe Mode is disabled
+      if (!this.latencyThresholds.enabled) {
+        // Reset counters and ensure not in safe mode
+        if (this.state.isSafeMode) {
+          this.exitSafeMode();
+        }
+        return;
+      }
+      
       const connectionStatus = wsManager.getConnectionStatus();
       const now = Date.now();
       
       (['binance', 'okx', 'bybit'] as ExchangeName[]).forEach(exchange => {
         const status = connectionStatus[exchange];
         if (!status) return;
+        
+        // Get per-exchange thresholds
+        const thresholds = this.latencyThresholds[exchange] || { enter: 1200, exit: 800 };
+        const enterThreshold = thresholds.enter;
+        const exitThreshold = thresholds.exit;
         
         // For Safe Mode, only use FRESH RTT samples from ping/pong (lastRttAt)
         // Binance has no ping/pong so lastRttAt stays 0 - exclude from Safe Mode triggers
@@ -305,7 +334,7 @@ class HFTCore {
           exchange,
           rtt: status.latency,
           timestamp: now,
-          healthy: isConnected && (!hasValidRTT || status.latency < SAFE_MODE_LATENCY_THRESHOLD),
+          healthy: isConnected && (!hasValidRTT || status.latency < enterThreshold),
         };
         
         this.state.lastHeartbeats[exchange] = heartbeat;
@@ -323,12 +352,12 @@ class HFTCore {
           return;
         }
         
-        // Track consecutive high/low latency only with valid samples
-        if (status.latency > SAFE_MODE_LATENCY_THRESHOLD) {
+        // Track consecutive high/low latency only with valid samples (use per-exchange thresholds)
+        if (status.latency > enterThreshold) {
           this.state.consecutiveHighLatency[exchange] = 
             (this.state.consecutiveHighLatency[exchange] || 0) + 1;
           this.state.consecutiveLowLatency[exchange] = 0;
-        } else if (status.latency < SAFE_MODE_EXIT_THRESHOLD) {
+        } else if (status.latency < exitThreshold) {
           this.state.consecutiveLowLatency[exchange] = 
             (this.state.consecutiveLowLatency[exchange] || 0) + 1;
           this.state.consecutiveHighLatency[exchange] = 0;
@@ -514,6 +543,27 @@ class HFTCore {
   
   getLatencyStatus(): Record<ExchangeName, LatencyHeartbeat | undefined> {
     return { ...this.state.lastHeartbeats };
+  }
+  
+  // Update latency thresholds dynamically from settings
+  updateLatencyThresholds(config: {
+    binance: { enter: number; exit: number };
+    okx: { enter: number; exit: number };
+    bybit: { enter: number; exit: number };
+    enabled: boolean;
+  }): void {
+    this.latencyThresholds = config;
+    console.log('📊 HFTCore latency thresholds updated:', config);
+    
+    // If safe mode is disabled and we're in safe mode, exit immediately
+    if (!config.enabled && this.state.isSafeMode) {
+      this.exitSafeMode();
+    }
+  }
+  
+  // Get current latency threshold configuration
+  getLatencyThresholds() {
+    return { ...this.latencyThresholds };
   }
 }
 

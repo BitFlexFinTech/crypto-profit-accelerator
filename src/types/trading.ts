@@ -16,6 +16,14 @@ export interface BotSettings {
   daily_loss_limit: number;
   max_open_positions: number;
   ai_aggressiveness: 'conservative' | 'balanced' | 'aggressive';
+  // Latency thresholds per exchange
+  latency_threshold_binance: number;
+  latency_threshold_okx: number;
+  latency_threshold_bybit: number;
+  latency_exit_threshold_binance: number;
+  latency_exit_threshold_okx: number;
+  latency_exit_threshold_bybit: number;
+  safe_mode_enabled: boolean;
   created_at: string;
   updated_at: string;
 }
