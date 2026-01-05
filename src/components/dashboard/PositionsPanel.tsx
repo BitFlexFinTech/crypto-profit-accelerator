@@ -300,9 +300,27 @@ export function PositionsPanel() {
                             )}
                           </div>
                           <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
-                            <span>${position.entry_price.toFixed(2)}</span>
+                            <span title="Entry">${position.entry_price.toFixed(2)}</span>
                             <span>→</span>
-                            <span className="text-foreground">${currentPrice?.toFixed(2) || '-'}</span>
+                            <span className="text-foreground" title="Current">${currentPrice?.toFixed(2) || '-'}</span>
+                            {position.take_profit_price && (
+                              <>
+                                <span>→</span>
+                                <span className="text-primary font-medium" title="Take Profit Target">
+                                  ${Number(position.take_profit_price).toFixed(2)}
+                                </span>
+                                {position.take_profit_status === 'pending' && (
+                                  <Badge variant="outline" className="text-[7px] px-0.5 py-0 h-3 bg-blue-500/10 text-blue-400 border-blue-500/30">
+                                    TP
+                                  </Badge>
+                                )}
+                                {position.take_profit_status === 'filled' && (
+                                  <Badge variant="outline" className="text-[7px] px-0.5 py-0 h-3 bg-primary/10 text-primary border-primary/30">
+                                    FILLED
+                                  </Badge>
+                                )}
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
