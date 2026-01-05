@@ -498,7 +498,7 @@ class HFTCore {
         this.isProcessingQueue = false;
         this.notifyStateChange();
       }
-    }, 100); // Process every 100ms
+    }, 50); // HFT: Reduced from 100ms to 50ms for faster persistence
   }
   
   // ============================================
