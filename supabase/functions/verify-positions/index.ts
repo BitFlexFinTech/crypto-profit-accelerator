@@ -179,7 +179,13 @@ async function fetchOKXFuturesPositions(credentials: ExchangeCredentials): Promi
 
     const positions: Record<string, { amount: number; direction: "long" | "short" }> = {};
     
+    // Log raw API response for debugging phantom positions
+    console.log(`[OKX Futures RAW] API returned ${data.data?.length || 0} positions`);
+    
     for (const pos of data.data || []) {
+      // Detailed logging of each position from OKX API
+      console.log(`[OKX Futures RAW] instId=${pos.instId}, pos=${pos.pos}, posSide=${pos.posSide}, posId=${pos.posId}, mgnMode=${pos.mgnMode}, availPos=${pos.availPos}, lever=${pos.lever}`);
+      
       // OKX returns pos (number of contracts) and posSide (long/short/net)
       const posAmt = parseFloat(pos.pos) || 0;
       if (Math.abs(posAmt) > 0) {
@@ -192,6 +198,13 @@ async function fetchOKXFuturesPositions(credentials: ExchangeCredentials): Promi
           direction = "short";
         }
         
+        // Get contract size for quantity conversion
+        const baseAsset = symbol.split("/")[0].toUpperCase();
+        const contractSize = OKX_CONTRACT_SIZE[baseAsset] || 1;
+        const actualQuantity = Math.abs(posAmt) * contractSize;
+        
+        console.log(`[OKX Futures PARSED] ${symbol} ${direction}: contracts=${Math.abs(posAmt)}, contractSize=${contractSize}, actualQty=${actualQuantity}`);
+        
         positions[symbol] = {
           amount: Math.abs(posAmt), // This is contracts for OKX
           direction,
@@ -199,7 +212,7 @@ async function fetchOKXFuturesPositions(credentials: ExchangeCredentials): Promi
       }
     }
 
-    console.log(`[OKX Futures] Found ${Object.keys(positions).length} open positions`);
+    console.log(`[OKX Futures] Found ${Object.keys(positions).length} open positions: ${JSON.stringify(Object.keys(positions))}`);
     return positions;
   } catch (error) {
     console.error(`[OKX Futures] Position fetch error:`, error);
