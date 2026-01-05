@@ -177,26 +177,43 @@ function calculateBollingerBands(prices: number[], period: number = 20, stdDev: 
   return { upper, middle, lower, position: Math.max(0, Math.min(1, position)) };
 }
 
-// Fetch kline/candlestick data for technical analysis
+// Fetch kline/candlestick data for technical analysis - USES CORRECT EXCHANGE API
 async function fetchKlineData(symbol: string, exchange: string): Promise<number[]> {
   try {
-    const binanceSymbol = symbol.replace('/', '');
+    // Use OKX API for OKX exchange
+    if (exchange === "okx") {
+      const okxSymbol = symbol.replace('/', '-');
+      const response = await fetch(
+        `https://www.okx.com/api/v5/market/candles?instId=${okxSymbol}&bar=1m&limit=50`
+      );
+      
+      if (!response.ok) {
+        console.log(`[OKX] Failed to fetch klines for ${symbol}: ${response.status}`);
+        return [];
+      }
+      
+      const data = await response.json();
+      if (!data.data || data.data.length === 0) return [];
+      // OKX returns [ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm] - close is index 4
+      return data.data.map((candle: any[]) => parseFloat(candle[4])).reverse();
+    }
     
-    // Fetch 1-minute candles (last 50)
+    // Default to Binance API
+    const binanceSymbol = symbol.replace('/', '');
     const response = await fetch(
       `https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=1m&limit=50`
     );
     
     if (!response.ok) {
-      console.log(`Failed to fetch klines for ${symbol}: ${response.status}`);
+      console.log(`[Binance] Failed to fetch klines for ${symbol}: ${response.status}`);
       return [];
     }
     
     const data = await response.json();
-    // Extract close prices
+    // Binance returns [openTime, o, h, l, c, vol, closeTime, ...] - close is index 4
     return data.map((candle: any[]) => parseFloat(candle[4]));
   } catch (error) {
-    console.log(`Error fetching klines for ${symbol}:`, error);
+    console.log(`Error fetching klines for ${symbol} on ${exchange}:`, error);
     return [];
   }
 }
@@ -562,6 +579,17 @@ serve(async (req) => {
     const supabaseClient = createClient(supabaseUrl, supabaseKey);
 
     const historicalPerfPromise = fetchHistoricalPerformance(supabaseClient);
+    
+    // Fetch exchange USDT balances for balance-aware selection
+    const balancesPromise = supabaseClient
+      .from("balances")
+      .select("exchange_id, available, currency")
+      .eq("currency", "USDT");
+    
+    const exchangesDataPromise = supabaseClient
+      .from("exchanges")
+      .select("id, exchange, is_enabled")
+      .eq("is_enabled", true);
 
     // Fetch market data from enabled exchanges
     const allMarketData: { exchange: string; data: MarketData[] }[] = [];
@@ -600,6 +628,21 @@ serve(async (req) => {
     await Promise.all(fetchPromises);
     const historicalPerf = await historicalPerfPromise;
     
+    // Build exchange balance map
+    const [balancesResult, exchangesResult] = await Promise.all([balancesPromise, exchangesDataPromise]);
+    const exchangeIdToName = new Map(
+      (exchangesResult.data || []).map((e: any) => [e.id, e.exchange])
+    );
+    const exchangeBalances = new Map<string, number>();
+    (balancesResult.data || []).forEach((b: any) => {
+      const exchangeName = exchangeIdToName.get(b.exchange_id);
+      if (exchangeName) {
+        exchangeBalances.set(exchangeName, Number(b.available) || 0);
+      }
+    });
+    
+    console.log("Exchange USDT balances:", Object.fromEntries(exchangeBalances));
+    
     console.log("Fetched market data from", allMarketData.length, "exchanges");
 
     // Fetch technical indicators for top pairs (in parallel)
@@ -620,14 +663,16 @@ serve(async (req) => {
 
     // Prepare data for AI analysis with technical indicators
     // ⚡ SPEED FILTER: Only include pairs that pass speed requirements
-    const marketSummary = allMarketData.flatMap(({ exchange, data }) =>
+    const marketSummaryRaw = allMarketData.flatMap(({ exchange, data }) =>
       data.map(d => {
         const perf = historicalPerf[d.symbol];
         const technicals = technicalMap.get(d.symbol);
         const scoreResult = calculateScore(d, aggressiveness, perf, technicals);
+        const exchangeBalance = exchangeBalances.get(exchange) || 0;
         
         return {
           exchange,
+          exchangeBalance,
           ...d,
           volatility: calculateVolatility(d.high24h, d.low24h, d.price),
           momentum: calculateMomentum(d.priceChange1h, d.priceChange24h),
@@ -648,10 +693,26 @@ serve(async (req) => {
       })
     ).filter(d => !d.rejected); // Remove rejected slow pairs
 
+    // BALANCE-AWARE EXCHANGE SELECTION: For each symbol, keep only the exchange with more USDT balance
+    const symbolToExchangeMap = new Map<string, typeof marketSummaryRaw[0]>();
+    marketSummaryRaw.forEach(d => {
+      const existing = symbolToExchangeMap.get(d.symbol);
+      if (!existing || d.exchangeBalance > existing.exchangeBalance) {
+        symbolToExchangeMap.set(d.symbol, d);
+      }
+    });
+    
+    const marketSummary = Array.from(symbolToExchangeMap.values());
     marketSummary.sort((a, b) => b.score - a.score);
     const topCandidates = marketSummary.slice(0, 10);
     
-    console.log(`Speed-filtered: ${topCandidates.length} candidates (removed slow pairs)`);
+    // Log which exchange was selected for each symbol
+    console.log("Balance-aware selection:");
+    topCandidates.forEach(c => {
+      console.log(`  ${c.symbol} → ${c.exchange} ($${c.exchangeBalance.toFixed(0)} USDT)`);
+    });
+    
+    console.log(`Speed-filtered: ${topCandidates.length} candidates (removed slow pairs, deduplicated by symbol)`);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
