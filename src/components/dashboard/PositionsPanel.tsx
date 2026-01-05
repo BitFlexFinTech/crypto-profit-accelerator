@@ -322,6 +322,46 @@ export function PositionsPanel() {
                               </>
                             )}
                           </div>
+                          {/* TP Progress Indicator */}
+                          {position.take_profit_price && currentPrice && (() => {
+                            const entryPrice = position.entry_price;
+                            const tpPrice = Number(position.take_profit_price);
+                            let tpProgress: number;
+                            
+                            if (position.direction === 'long') {
+                              const totalDistance = tpPrice - entryPrice;
+                              const currentDistance = currentPrice - entryPrice;
+                              tpProgress = totalDistance > 0 ? Math.min(100, Math.max(0, (currentDistance / totalDistance) * 100)) : 0;
+                            } else {
+                              const totalDistance = entryPrice - tpPrice;
+                              const currentDistance = entryPrice - currentPrice;
+                              tpProgress = totalDistance > 0 ? Math.min(100, Math.max(0, (currentDistance / totalDistance) * 100)) : 0;
+                            }
+                            
+                            return (
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden max-w-[80px]">
+                                  <div 
+                                    className={cn(
+                                      "h-full rounded-full transition-all",
+                                      tpProgress >= 80 ? "bg-primary" : 
+                                      tpProgress >= 50 ? "bg-yellow-500" : 
+                                      "bg-blue-500"
+                                    )}
+                                    style={{ width: `${Math.max(0, tpProgress)}%` }}
+                                  />
+                                </div>
+                                <span className={cn(
+                                  "text-[8px] font-mono",
+                                  tpProgress >= 80 ? "text-primary" : 
+                                  tpProgress >= 50 ? "text-yellow-500" : 
+                                  "text-blue-400"
+                                )}>
+                                  {tpProgress.toFixed(0)}% to TP
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                       
