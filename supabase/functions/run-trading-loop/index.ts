@@ -28,7 +28,13 @@ interface LoopResult {
   signalsGenerated: number;
   tradesExecuted: number;
   positionsClosed: number;
-  errors: string[];
+  errors: Array<{
+    symbol?: string;
+    exchange?: string;
+    errorType?: string;
+    message: string;
+    suggestion?: string;
+  }>;
   timestamp: string;
 }
 
@@ -170,7 +176,10 @@ serve(async (req) => {
                 }
               } catch (e) {
                 console.error(`Error closing position ${position.id}:`, e);
-                result.errors.push(`Failed to close ${position.symbol}`);
+                result.errors.push({
+                  symbol: position.symbol,
+                  message: `Failed to close position: ${e instanceof Error ? e.message : 'Unknown error'}`,
+                });
               }
             }
           }
@@ -320,11 +329,28 @@ serve(async (req) => {
           result.tradesExecuted++;
           result.actions.push(`Executed ${signal.direction} ${signal.symbol} @ $${signal.entryPrice.toFixed(2)}`);
         } else {
-          result.errors.push(`Failed ${signal.symbol}: ${tradeResult.error || "Unknown error"}`);
+          // Capture structured error details
+          result.errors.push({
+            symbol: signal.symbol,
+            exchange: signal.exchange,
+            errorType: tradeResult.errorType || 'EXCHANGE_ERROR',
+            message: tradeResult.error || 'Unknown error',
+            suggestion: tradeResult.suggestion,
+          });
+          
+          // Log specific error type for debugging
+          if (tradeResult.errorType === 'API_PERMISSION_ERROR') {
+            console.error(`⚠️ API PERMISSION ERROR for ${signal.symbol}: ${tradeResult.error}`);
+            console.error(`💡 Suggestion: ${tradeResult.suggestion}`);
+          }
         }
       } catch (e) {
         console.error(`Error executing trade for ${signal.symbol}:`, e);
-        result.errors.push(`Exception executing ${signal.symbol}`);
+        result.errors.push({
+          symbol: signal.symbol,
+          exchange: signal.exchange,
+          message: `Exception: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        });
       }
     }
 
@@ -342,7 +368,9 @@ serve(async (req) => {
     console.error("=== TRADING LOOP ERROR ===", error);
     result.success = false;
     result.status = "error";
-    result.errors.push(error instanceof Error ? error.message : "Unknown error");
+    result.errors.push({
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
     
     return new Response(JSON.stringify(result), {
       status: 500,
