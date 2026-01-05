@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.test-connection]
 verify_jwt = false
+
+[functions.run-trading-loop]
+verify_jwt = false
