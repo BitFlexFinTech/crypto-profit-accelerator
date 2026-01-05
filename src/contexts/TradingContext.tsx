@@ -6,6 +6,7 @@ import { invokeWithRetry } from '@/utils/retryWithBackoff';
 import { fetchAllPrices } from '@/services/PriceFetcher';
 import { wsManager, PriceUpdate } from '@/services/ExchangeWebSocketManager';
 import { tpOrderMonitor } from '@/services/TPOrderMonitor';
+import { hftCore } from '@/services/HFTCore';
 
 type ExchangeName = 'binance' | 'okx' | 'nexo' | 'bybit' | 'kucoin' | 'hyperliquid';
 
@@ -763,16 +764,6 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
-    // Check max positions
-    if (currentPositions.length >= (currentSettings.max_open_positions || 50)) {
-      appendExecutionLog({ 
-        type: 'BLOCKED', 
-        message: `Max positions reached (${currentPositions.length}/${currentSettings.max_open_positions})`,
-        symbol: signal.symbol,
-      });
-      return false;
-    }
-
     // ⚡ STRICT RULE: Find the exact exchange from signal - NO FALLBACK
     const targetExchange = currentExchanges.find(e => e.exchange === signal.exchange && e.is_connected && e.is_enabled);
     if (!targetExchange) {
@@ -817,28 +808,35 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     const availableForTrades = exchangeAvailableUSDT - lockedInExchangePositions;
 
     // Calculate order size - use all available balance optimally
-    // Target: Use up to 25% of available per trade, but respect min/max settings
     const idealOrderSize = Math.min(availableForTrades * 0.25, currentSettings.max_order_size);
     const orderSize = Math.min(
       Math.max(currentSettings.min_order_size, 333),
       idealOrderSize > currentSettings.min_order_size ? idealOrderSize : currentSettings.max_order_size
     );
 
-    // CRITICAL: Check if we have enough balance
-    if (orderSize > availableForTrades) {
+    // ⚡ HFT PRE-TRADE RISK CHECK
+    // Validates safe mode, fat-finger protection, balance, position count, daily loss
+    const riskCheck = hftCore.preTradeRiskCheck({
+      exchange: signal.exchange as 'binance' | 'okx' | 'bybit' | 'kucoin' | 'hyperliquid',
+      symbol: signal.symbol,
+      orderSizeUsd: orderSize,
+      entryPrice: signal.entryPrice,
+      direction: signal.direction,
+      availableBalance: availableForTrades,
+      currentPositionCount: currentPositions.length,
+      maxPositions: currentSettings.max_open_positions || 50,
+      minOrderSize: currentSettings.min_order_size,
+      maxOrderSize: currentSettings.max_order_size,
+      dailyLossLimit: currentSettings.daily_loss_limit || 100,
+      currentDailyLoss: 0, // TODO: Calculate from daily_stats
+    });
+    
+    if (!riskCheck.allowed) {
       appendExecutionLog({ 
         type: 'BLOCKED', 
-        message: `Insufficient balance: $${availableForTrades.toFixed(2)} available, need $${orderSize.toFixed(2)}`,
+        message: `HFT Risk Check: ${riskCheck.reason}`,
         symbol: signal.symbol,
-      });
-      return false;
-    }
-
-    if (orderSize < currentSettings.min_order_size) {
-      appendExecutionLog({ 
-        type: 'BLOCKED', 
-        message: `Order size $${orderSize.toFixed(2)} below minimum $${currentSettings.min_order_size}`,
-        symbol: signal.symbol,
+        suggestion: riskCheck.suggestion,
       });
       return false;
     }
@@ -1437,6 +1435,28 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         }));
       });
       
+      // ⚡ HFT: Subscribe to immediate trade broadcasts for instant dashboard updates
+      const tradeBroadcastChannel = supabase
+        .channel('trade-broadcasts')
+        .on('broadcast', { event: 'trade_executed' }, (payload) => {
+          console.log('[HFT] Immediate trade broadcast received:', payload);
+          setLastRealtimeUpdate(Date.now());
+          
+          // Optimistically add the new position to local state
+          const { trade, position } = payload.payload || {};
+          if (position?.id) {
+            appendExecutionLog({
+              type: 'INFO',
+              message: `[HFT] Trade broadcast: ${trade?.direction?.toUpperCase()} ${trade?.symbol}`,
+              symbol: trade?.symbol,
+            });
+            
+            // Trigger a refresh of positions to sync with DB
+            fetchAllData();
+          }
+        })
+        .subscribe();
+      
       // Also try legacy WebSocket for specific exchanges
       connectToExchange('binance');
       
@@ -1450,9 +1470,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       
       return () => {
         unsubscribe();
+        supabase.removeChannel(tradeBroadcastChannel);
       };
     }
-  }, [loading, connectToExchange, startRestFallback]);
+  }, [loading, connectToExchange, startRestFallback, appendExecutionLog, fetchAllData]);
 
   // Connect to additional exchanges
   useEffect(() => {

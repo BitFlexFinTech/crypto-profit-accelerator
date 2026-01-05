@@ -1130,18 +1130,66 @@ serve(async (req) => {
     if (positionError) throw positionError;
 
     // ============================================
-    // STEP 6: CREATE NOTIFICATION
+    // STEP 5.5: IMMEDIATE BROADCAST VIA REALTIME
+    // Broadcast to dashboard BEFORE DB notification write
+    // This ensures instant UI updates without waiting for DB
+    // ============================================
+    const tradeBroadcast = {
+      type: 'TRADE_EXECUTED',
+      timestamp: Date.now(),
+      trade: {
+        id: trade.id,
+        symbol: tradeRequest.symbol,
+        direction: tradeRequest.direction,
+        entryPrice: executedPrice,
+        quantity,
+        orderSizeUsd: tradeRequest.orderSizeUsd,
+        isLive,
+        exchange: exchange.exchange,
+      },
+      position: {
+        id: position.id,
+        takeProfitPrice,
+        takeProfitOrderId,
+        profitTarget: tradeRequest.profitTarget,
+      },
+    };
+    
+    // Broadcast via Supabase Realtime channel (non-blocking)
+    try {
+      const channel = supabase.channel('trade-broadcasts');
+      await channel.send({
+        type: 'broadcast',
+        event: 'trade_executed',
+        payload: tradeBroadcast,
+      });
+      console.log('[BROADCAST] Trade executed event sent to dashboard');
+    } catch (broadcastError) {
+      // Non-critical - don't fail the trade if broadcast fails
+      console.warn('[BROADCAST] Failed to broadcast:', broadcastError);
+    }
+
+    // ============================================
+    // STEP 6: CREATE NOTIFICATION (async, non-blocking)
     // ============================================
     const liveIndicator = isLive ? "🔴 LIVE" : "📝 Paper";
-    await supabase
-      .from("notifications")
-      .insert({
-        user_id: exchange.user_id,
-        type: "trade_opened",
-        title: `${liveIndicator} ${tradeRequest.direction.toUpperCase()} ${tradeRequest.symbol}`,
-        message: `Opened ${tradeRequest.direction} on ${exchange.exchange} at $${executedPrice.toFixed(4)}. Size: $${tradeRequest.orderSizeUsd.toFixed(2)}. Entry Order: ${entryOrderId}. TP @ $${takeProfitPrice.toFixed(4)}`,
-        trade_id: trade.id,
-      });
+    // Fire-and-forget: wrapped in async IIFE
+    (async () => {
+      try {
+        await supabase
+          .from("notifications")
+          .insert({
+            user_id: exchange.user_id,
+            type: "trade_opened",
+            title: `${liveIndicator} ${tradeRequest.direction.toUpperCase()} ${tradeRequest.symbol}`,
+            message: `Opened ${tradeRequest.direction} on ${exchange.exchange} at $${executedPrice.toFixed(4)}. Size: $${tradeRequest.orderSizeUsd.toFixed(2)}. Entry Order: ${entryOrderId}. TP @ $${takeProfitPrice.toFixed(4)}`,
+            trade_id: trade.id,
+          });
+        console.log('[ASYNC] Notification created');
+      } catch (err) {
+        console.warn('[ASYNC] Notification failed:', err);
+      }
+    })();
 
     console.log("=== TRADE EXECUTED SUCCESSFULLY ===");
     console.log("Trade ID:", trade.id);
