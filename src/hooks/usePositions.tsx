@@ -42,7 +42,7 @@ export function usePositions() {
 
   const subscribeToPositions = () => {
     const channel = supabase
-      .channel('positions-changes')
+      .channel('positions-and-balances-realtime')
       .on(
         'postgres_changes',
         {
@@ -50,11 +50,38 @@ export function usePositions() {
           schema: 'public',
           table: 'positions',
         },
-        () => {
+        (payload) => {
+          console.log('[Realtime] Position update:', payload.eventType);
           fetchPositions();
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'balances',
+        },
+        (payload) => {
+          console.log('[Realtime] Balance update:', payload.eventType);
+          // Could trigger a balance refresh here if needed
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trades',
+        },
+        (payload) => {
+          console.log('[Realtime] Trade update:', payload.eventType);
+          fetchPositions(); // Refresh positions when trades change
+        }
+      )
+      .subscribe((status) => {
+        console.log('[Realtime] Subscription status:', status);
+      });
 
     return () => {
       supabase.removeChannel(channel);
