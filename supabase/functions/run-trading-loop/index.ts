@@ -302,10 +302,13 @@ serve(async (req) => {
         continue;
       }
 
-      // Check if we already have a position for this symbol
-      const existingPosition = openPositions?.find(p => p.symbol === signal.symbol);
+      // Check if we already have a position for this (exchange:symbol) combination
+      // This allows SIMULTANEOUS positions on Binance AND OKX for the same symbol
+      const existingPosition = openPositions?.find(p => 
+        p.symbol === signal.symbol && p.exchange_id === exchange.id
+      );
       if (existingPosition) {
-        console.log(`Already have position in ${signal.symbol}, skipping`);
+        console.log(`Already have position in ${signal.symbol} on ${signal.exchange}, skipping`);
         continue;
       }
 

@@ -645,28 +645,34 @@ serve(async (req) => {
     
     console.log("Fetched market data from", allMarketData.length, "exchanges");
 
-    // Fetch technical indicators for top pairs (in parallel)
-    const uniqueSymbols = new Set<string>();
-    allMarketData.forEach(({ data }) => data.forEach(d => uniqueSymbols.add(d.symbol)));
+    // Fetch technical indicators for top pairs PER EXCHANGE (in parallel)
+    // Key by "exchange:symbol" to support simultaneous trading on both exchanges
+    const exchangeSymbolPairs: { exchange: string; symbol: string; price: number }[] = [];
+    allMarketData.forEach(({ exchange, data }) => {
+      data.forEach(d => {
+        exchangeSymbolPairs.push({ exchange, symbol: d.symbol, price: d.price });
+      });
+    });
     
-    const technicalPromises = Array.from(uniqueSymbols).slice(0, 10).map(async (symbol) => {
-      const marketInfo = allMarketData.flatMap(e => e.data).find(d => d.symbol === symbol);
-      const exchange = allMarketData.find(e => e.data.some(d => d.symbol === symbol))?.exchange || "binance";
-      const technicals = await calculateTechnicalIndicators(symbol, exchange, marketInfo?.price || 0);
-      return { symbol, technicals };
+    // Limit to top 20 exchange:symbol pairs (10 per exchange if both connected)
+    const technicalPromises = exchangeSymbolPairs.slice(0, 20).map(async ({ exchange, symbol, price }) => {
+      const technicals = await calculateTechnicalIndicators(symbol, exchange, price);
+      return { key: `${exchange}:${symbol}`, technicals };
     });
     
     const technicalResults = await Promise.all(technicalPromises);
-    const technicalMap = new Map(technicalResults.map(t => [t.symbol, t.technicals]));
+    const technicalMap = new Map(technicalResults.map(t => [t.key, t.technicals]));
     
     console.log("Calculated technical indicators for", technicalMap.size, "symbols");
 
     // Prepare data for AI analysis with technical indicators
     // ⚡ SPEED FILTER: Only include pairs that pass speed requirements
+    // ⚡ SIMULTANEOUS EXCHANGE SUPPORT: Keep candidates from ALL exchanges (no deduplication by symbol)
     const marketSummaryRaw = allMarketData.flatMap(({ exchange, data }) =>
       data.map(d => {
         const perf = historicalPerf[d.symbol];
-        const technicals = technicalMap.get(d.symbol);
+        // Use exchange-specific technicals
+        const technicals = technicalMap.get(`${exchange}:${d.symbol}`);
         const scoreResult = calculateScore(d, aggressiveness, perf, technicals);
         const exchangeBalance = exchangeBalances.get(exchange) || 0;
         
@@ -691,28 +697,22 @@ serve(async (req) => {
           historicalTradeCount: perf?.tradeCount,
         };
       })
-    ).filter(d => !d.rejected); // Remove rejected slow pairs
+    ).filter(d => !d.rejected && d.exchangeBalance >= 100); // Remove rejected slow pairs AND exchanges with insufficient balance
 
-    // BALANCE-AWARE EXCHANGE SELECTION: For each symbol, keep only the exchange with more USDT balance
-    const symbolToExchangeMap = new Map<string, typeof marketSummaryRaw[0]>();
-    marketSummaryRaw.forEach(d => {
-      const existing = symbolToExchangeMap.get(d.symbol);
-      if (!existing || d.exchangeBalance > existing.exchangeBalance) {
-        symbolToExchangeMap.set(d.symbol, d);
-      }
-    });
+    // ⚡ NO DEDUPLICATION BY SYMBOL - Keep all exchange:symbol pairs to enable simultaneous trading
+    // Sort by score, then take top candidates (ensuring fair distribution across exchanges)
+    const marketSummary = [...marketSummaryRaw].sort((a, b) => b.score - a.score);
     
-    const marketSummary = Array.from(symbolToExchangeMap.values());
-    marketSummary.sort((a, b) => b.score - a.score);
-    const topCandidates = marketSummary.slice(0, 10);
+    // Take top 15 candidates total (allows for both exchanges to have representation)
+    const topCandidates = marketSummary.slice(0, 15);
     
-    // Log which exchange was selected for each symbol
-    console.log("Balance-aware selection:");
+    // Log all candidates with their exchanges
+    console.log("Multi-exchange candidates (NO deduplication):");
     topCandidates.forEach(c => {
-      console.log(`  ${c.symbol} → ${c.exchange} ($${c.exchangeBalance.toFixed(0)} USDT)`);
+      console.log(`  ${c.exchange}:${c.symbol} (score=${c.score}, $${c.exchangeBalance.toFixed(0)} USDT)`);
     });
     
-    console.log(`Speed-filtered: ${topCandidates.length} candidates (removed slow pairs, deduplicated by symbol)`);
+    console.log(`Speed-filtered: ${topCandidates.length} candidates from ${new Set(topCandidates.map(c => c.exchange)).size} exchanges`);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {

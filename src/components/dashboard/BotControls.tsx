@@ -59,7 +59,7 @@ export function BotControls() {
     try {
       appendExecutionLog({
         type: 'INFO',
-        message: 'Force Run triggered manually',
+        message: '⚡ Force Run triggered manually',
       });
       
       const { data, error } = await supabase.functions.invoke('run-trading-loop');
@@ -78,9 +78,61 @@ export function BotControls() {
 
       const result = data;
       
-      if (result?.status === 'skipped') {
+      // Log comprehensive action trail from server loop
+      if (result?.actions?.length > 0) {
+        result.actions.forEach((action: string) => {
+          appendExecutionLog({
+            type: 'INFO',
+            message: `[Server] ${action}`,
+          });
+        });
+      }
+      
+      // Log signals generated
+      if (result?.signalsGenerated > 0) {
+        appendExecutionLog({
+          type: 'SIGNALS_RECEIVED',
+          message: `[Server] Generated ${result.signalsGenerated} trading signals`,
+        });
+      }
+      
+      // Log trades executed
+      if (result?.tradesExecuted > 0) {
+        appendExecutionLog({
+          type: 'TRADE_SUCCESS',
+          message: `[Server] Executed ${result.tradesExecuted} trade(s)`,
+        });
+      }
+      
+      // Log positions closed
+      if (result?.positionsClosed > 0) {
+        appendExecutionLog({
+          type: 'TRADE_SUCCESS',
+          message: `[Server] Closed ${result.positionsClosed} position(s) at profit target`,
+        });
+      }
+      
+      if (result?.status === 'bot_stopped') {
         toast.info('Bot Not Running', {
           description: 'Start the bot first to execute trades',
+          dismissible: true,
+        });
+        appendExecutionLog({
+          type: 'BLOCKED',
+          message: '[Server] Bot is stopped - no trades executed',
+        });
+      } else if (result?.status === 'no_exchanges') {
+        toast.warning('No Exchanges Connected', {
+          description: 'Connect at least one exchange in Settings',
+          dismissible: true,
+        });
+        appendExecutionLog({
+          type: 'BLOCKED',
+          message: '[Server] No exchanges connected',
+        });
+      } else if (result?.status === 'max_positions') {
+        toast.info('Max Positions Reached', {
+          description: 'Monitoring existing positions only',
           dismissible: true,
         });
       } else if (result?.tradesExecuted > 0) {
@@ -97,16 +149,29 @@ export function BotControls() {
 
       // Log any errors from the loop
       if (result?.errors?.length > 0) {
-        result.errors.forEach((err: { symbol?: string; message?: string; suggestion?: string; errorType?: string }) => {
+        result.errors.forEach((err: { symbol?: string; exchange?: string; message?: string; suggestion?: string; errorType?: string }) => {
           appendExecutionLog({
-            type: err.errorType === 'API_PERMISSION_ERROR' ? 'API_PERMISSION_ERROR' : 'ERROR',
-            message: `${err.symbol || 'Trade'}: ${err.message}`,
+            type: err.errorType === 'API_PERMISSION_ERROR' ? 'API_PERMISSION_ERROR' : 'TRADE_FAILED',
+            message: `[Server] ${err.exchange ? `${err.exchange}:` : ''}${err.symbol || 'Trade'}: ${err.message}`,
+            symbol: err.symbol,
             suggestion: err.suggestion,
+            errorType: err.errorType,
           });
         });
       }
+      
+      // Final summary log
+      appendExecutionLog({
+        type: 'LOOP_TICK',
+        message: `Force Run complete: ${result?.signalsGenerated || 0} signals, ${result?.tradesExecuted || 0} trades, ${result?.positionsClosed || 0} closed, ${result?.errors?.length || 0} errors`,
+      });
+      
     } catch (error) {
       toast.error('Force Run Failed', { dismissible: true });
+      appendExecutionLog({
+        type: 'ERROR',
+        message: `Force Run exception: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
     } finally {
       setIsForceRunning(false);
     }
