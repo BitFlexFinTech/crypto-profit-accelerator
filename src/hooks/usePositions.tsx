@@ -161,6 +161,25 @@ export function usePositions() {
     return positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
   };
 
+  const reconcilePositions = async (autoFix = false) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('reconcile-positions', {
+        body: { autoFix },
+      });
+
+      if (error) throw error;
+
+      if (autoFix && data?.summary?.fixed > 0) {
+        await fetchPositions();
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error reconciling positions:', error);
+      throw error;
+    }
+  };
+
   return {
     positions,
     loading,
@@ -168,6 +187,7 @@ export function usePositions() {
     closeAllPositions,
     updatePositionPrice,
     getTotalUnrealizedPnl,
+    reconcilePositions,
     refetch: fetchPositions,
   };
 }

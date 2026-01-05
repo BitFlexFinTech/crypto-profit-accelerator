@@ -5,14 +5,15 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { TrendingUp, TrendingDown, AlertTriangle, Loader2, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertTriangle, Loader2, X, RefreshCcw } from 'lucide-react';
 import { EXCHANGE_CONFIGS } from '@/types/trading';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 export function PositionsPanel() {
-  const { positions, loading, closePosition, closeAllPositions, exchanges, prices } = useTrading();
+  const { positions, loading, closePosition, closeAllPositions, exchanges, prices, reconcilePositions } = useTrading();
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
+  const [isReconciling, setIsReconciling] = useState(false);
 
   const getExchangeName = (exchangeId?: string) => {
     if (!exchangeId) return 'Unk';
@@ -59,6 +60,36 @@ export function PositionsPanel() {
     }
   };
 
+  const handleReconcile = async () => {
+    setIsReconciling(true);
+    try {
+      const result = await reconcilePositions(false) as { summary?: { mismatched?: number; matched?: number; fixed?: number } };
+      if (result?.summary?.mismatched && result.summary.mismatched > 0) {
+        toast.warning(`Found ${result.summary.mismatched} mismatches`, {
+          description: 'Click "Fix All" to auto-close ghost positions',
+          action: {
+            label: 'Fix All',
+            onClick: async () => {
+              const fixResult = await reconcilePositions(true) as { summary?: { fixed?: number } };
+              if (fixResult?.summary?.fixed && fixResult.summary.fixed > 0) {
+                toast.success(`Fixed ${fixResult.summary.fixed} positions`);
+              }
+            },
+          },
+          duration: 10000,
+        });
+      } else {
+        toast.success('All positions synced', { 
+          description: `${result?.summary?.matched || 0} positions verified`,
+        });
+      }
+    } catch {
+      toast.error('Reconcile failed');
+    } finally {
+      setIsReconciling(false);
+    }
+  };
+
   if (loading) {
     return (
       <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
@@ -85,17 +116,29 @@ export function PositionsPanel() {
             </span>
           </p>
         </div>
-        {positions.length > 0 && (
+        <div className="flex items-center gap-1">
           <Button 
-            variant="destructive" 
+            variant="outline" 
             size="sm"
-            onClick={handleCloseAll}
+            onClick={handleReconcile}
+            disabled={isReconciling}
             className="h-5 px-1.5 text-[10px] gap-0.5"
           >
-            <AlertTriangle className="h-2.5 w-2.5" />
-            Close All
+            <RefreshCcw className={cn("h-2.5 w-2.5", isReconciling && "animate-spin")} />
+            Sync
           </Button>
-        )}
+          {positions.length > 0 && (
+            <Button 
+              variant="destructive" 
+              size="sm"
+              onClick={handleCloseAll}
+              className="h-5 px-1.5 text-[10px] gap-0.5"
+            >
+              <AlertTriangle className="h-2.5 w-2.5" />
+              Close All
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0 min-h-0">
         {positions.length === 0 ? (
