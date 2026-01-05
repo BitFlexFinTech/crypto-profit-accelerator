@@ -119,6 +119,25 @@ const QUANTITY_PRECISION: Record<string, number> = {
   'SEI': 0,    // stepSize: 1
 };
 
+// OKX SPOT quantity precision (decimals) - different from futures!
+const OKX_SPOT_PRECISION: Record<string, number> = {
+  'BTC': 8,    // 0.00000001 - OKX allows very small BTC amounts
+  'ETH': 6,    // 0.000001
+  'SOL': 4,    // 0.0001
+  'BNB': 4,    // 0.0001
+  'LTC': 4,    // 0.0001
+  'AVAX': 2,   // 0.01
+  'LINK': 2,   // 0.01
+  'DOT': 2,    // 0.01
+  'DOGE': 0,   // 1 (whole units)
+  'XRP': 2,    // 0.01
+  'ADA': 0,    // 1 (whole units)
+  'DEFAULT': 4
+};
+
+// OKX minimum order notional in USD (for spot trading)
+const OKX_MIN_NOTIONAL = 10; // $10 minimum for most spot pairs
+
 // OKX SWAP contract sizes (1 contract = X base asset)
 // For OKX futures, sz is the NUMBER OF CONTRACTS, not quantity
 const OKX_CONTRACT_SIZE: Record<string, number> = {
@@ -154,6 +173,15 @@ function formatQuantity(quantity: number, symbol: string, exchange?: string, tra
     const numContracts = Math.floor(quantity / contractSize);
     console.log(`[formatQuantity] OKX SWAP ${baseAsset}: ${quantity} / ${contractSize} = ${numContracts} contracts`);
     return numContracts.toString();
+  }
+  
+  // OKX SPOT: use specific OKX spot precision (truncate, don't round)
+  if (exchange === 'okx' && tradeType === 'spot') {
+    const precision = OKX_SPOT_PRECISION[baseAsset] ?? OKX_SPOT_PRECISION['DEFAULT'];
+    const multiplier = Math.pow(10, precision);
+    const truncatedQty = Math.floor(quantity * multiplier) / multiplier;
+    console.log(`[formatQuantity] OKX SPOT ${baseAsset}: ${quantity} -> ${truncatedQty} (precision: ${precision})`);
+    return truncatedQty.toFixed(precision);
   }
   
   // Binance/Bybit: use regular quantity precision
@@ -368,7 +396,8 @@ async function placeOKXMarketOrder(
   symbol: string,
   side: string,
   quantity: number,
-  tradeType: "spot" | "futures"
+  tradeType: "spot" | "futures",
+  currentPrice?: number
 ): Promise<OrderResult> {
   try {
     const timestamp = new Date().toISOString();
@@ -386,6 +415,24 @@ async function placeOKXMarketOrder(
         errorCode: "MIN_CONTRACT",
         errorType: 'EXCHANGE_ERROR',
       };
+    }
+    
+    // VALIDATION: Check minimum notional for OKX spot orders
+    if (tradeType === "spot") {
+      const price = currentPrice || 0;
+      const notionalValue = parseFloat(formattedQty) * price;
+      console.log(`[OKX SPOT] Checking notional: ${formattedQty} * $${price} = $${notionalValue.toFixed(2)}`);
+      
+      if (price > 0 && notionalValue < OKX_MIN_NOTIONAL) {
+        console.error(`[OKX SPOT] Order notional $${notionalValue.toFixed(2)} below minimum $${OKX_MIN_NOTIONAL}`);
+        return { 
+          success: false, 
+          orderId: "", 
+          error: `Order value $${notionalValue.toFixed(2)} below OKX minimum $${OKX_MIN_NOTIONAL}. Increase order size.`,
+          errorCode: "MIN_NOTIONAL",
+          errorType: 'EXCHANGE_ERROR',
+        };
+      }
     }
     
     const body = JSON.stringify({
@@ -726,7 +773,7 @@ async function placeEntryOrder(
       result = await placeBinanceMarketOrder(credentials, symbol, side, quantity, tradeType);
       break;
     case "okx":
-      result = await placeOKXMarketOrder(credentials, symbol, side, quantity, tradeType);
+      result = await placeOKXMarketOrder(credentials, symbol, side, quantity, tradeType, requestedPrice);
       break;
     case "bybit":
       result = await placeBybitMarketOrder(credentials, symbol, side, quantity, tradeType);
