@@ -19,6 +19,7 @@ interface OrderResult {
   orderId: string;
   executedPrice?: number;
   error?: string;
+  noBalance?: boolean;
 }
 
 // Format symbol for each exchange
@@ -308,6 +309,18 @@ async function placeOKXMarketOrder(
     
     if (data.code !== "0") {
       console.error(`[OKX] EXIT order failed:`, data);
+      
+      // Check for insufficient balance error (51008) - asset may have been sold by TP order
+      const errorCode = data.data?.[0]?.sCode;
+      if (errorCode === "51008" || data.msg?.toLowerCase().includes("insufficient")) {
+        return { 
+          success: false, 
+          orderId: "", 
+          error: data.msg || `API error: ${data.code}`,
+          noBalance: true 
+        };
+      }
+      
       return { success: false, orderId: "", error: data.msg || `API error: ${data.code}` };
     }
     
@@ -819,11 +832,80 @@ serve(async (req) => {
       currentPrice
     );
     
-    // STRICT RULE: NEVER auto-close positions even if no balance
+    // SPECIAL CASE: If TP order already filled AND exit fails with no balance,
+    // the TP order successfully closed the position on the exchange
+    if (exitResult.noBalance && tpAlreadyFilled) {
+      console.log("=== TP ORDER ALREADY FILLED - CLOSING POSITION AS SUCCESS ===");
+      const now = new Date().toISOString();
+      
+      // Use TP price as exit price since that's where it actually filled
+      const tpExitPrice = position.take_profit_price || currentPrice;
+      
+      // Calculate P&L using TP price
+      const feeRate = tradeType === "spot" ? 0.001 : 0.0005;
+      const exitFee = position.order_size_usd * feeRate;
+      const entryFee = position.order_size_usd * feeRate;
+      const fundingFee = tradeType === "futures" ? position.order_size_usd * 0.0001 : 0;
+      
+      let grossProfit: number;
+      if (position.direction === "long") {
+        grossProfit = (tpExitPrice - position.entry_price) * position.quantity * (position.leverage || 1);
+      } else {
+        grossProfit = (position.entry_price - tpExitPrice) * position.quantity * (position.leverage || 1);
+      }
+      
+      const netProfit = grossProfit - entryFee - exitFee - fundingFee;
+      
+      console.log(`TP Fill P&L: Exit=${tpExitPrice}, Gross=${grossProfit.toFixed(4)}, Net=${netProfit.toFixed(4)}`);
+      
+      // Update trade record
+      await supabase
+        .from("trades")
+        .update({
+          exit_price: tpExitPrice,
+          exit_fee: exitFee,
+          exit_order_id: position.take_profit_order_id,
+          funding_fee: fundingFee,
+          gross_profit: grossProfit,
+          net_profit: netProfit,
+          status: "closed",
+          closed_at: now,
+          tp_filled_at: now,
+        })
+        .eq("id", position.trade_id);
+      
+      // Update position record
+      await supabase
+        .from("positions")
+        .update({
+          current_price: tpExitPrice,
+          exit_order_id: position.take_profit_order_id,
+          unrealized_pnl: netProfit,
+          status: "closed",
+          take_profit_status: "filled",
+          take_profit_filled_at: now,
+          updated_at: now,
+          reconciliation_note: "TP order filled on exchange - detected via no balance on manual close attempt",
+        })
+        .eq("id", positionId);
+      
+      return new Response(JSON.stringify({
+        success: true,
+        tpFilled: true,
+        message: "Position was already closed by Take Profit order on exchange",
+        exitPrice: tpExitPrice,
+        netProfit,
+        grossProfit,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    
+    // STRICT RULE: NEVER auto-close positions even if no balance (and TP didn't fill)
     // Positions must ONLY close when profit target is hit
     // Flag as stuck for manual review instead
     if (exitResult.noBalance) {
-      console.warn("=== NO BALANCE - FLAGGING AS STUCK (NOT CLOSING) ===");
+      console.warn("=== NO BALANCE (TP NOT FILLED) - FLAGGING AS STUCK ===");
       const now = new Date().toISOString();
       
       // Revert to open but flag as stuck - DO NOT CLOSE
