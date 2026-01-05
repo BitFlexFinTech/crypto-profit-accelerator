@@ -278,13 +278,22 @@ async function placeOKXMarketOrder(
     const timestamp = new Date().toISOString();
     const formattedSymbol = formatSymbol(symbol, "okx", tradeType);
     
-    const body = JSON.stringify({
+    const orderPayload: Record<string, unknown> = {
       instId: formattedSymbol,
       tdMode: tradeType === "futures" ? "cross" : "cash",
       side: side.toLowerCase(),
       ordType: "market",
       sz: formatQuantity(quantity, symbol),
-    });
+    };
+
+    // Critical for futures exits: ensure we only reduce an existing position.
+    // Without reduceOnly, OKX may treat this as opening/adding, which can fail with
+    // "Insufficient USDT margin" even though a close should succeed.
+    if (tradeType === "futures") {
+      orderPayload.reduceOnly = true;
+    }
+
+    const body = JSON.stringify(orderPayload);
     
     const preHash = timestamp + "POST" + "/api/v5/trade/order" + body;
     const signature = createHmac("sha256", credentials.apiSecret)
