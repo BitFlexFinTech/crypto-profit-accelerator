@@ -41,7 +41,9 @@ const WS_ENDPOINTS: Record<string, string> = {
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_BASE_DELAY = 1000;
-const PING_INTERVAL = 8000; // 8s for frequent RTT updates (was 30s)
+const PING_INTERVAL = 30000; // 30s for stable ping/pong
+const BINANCE_RTT_INTERVAL = 60000; // 60s for Binance REST RTT (was 8s - too aggressive)
+const RTT_TIMEOUT = 2000; // Skip measurements taking > 2s
 
 class ExchangeWebSocketManager {
   private static instance: ExchangeWebSocketManager | null = null;
@@ -514,29 +516,51 @@ class ExchangeWebSocketManager {
   }
 
   // HFT: Binance REST-based RTT measurement (since no WebSocket app-level ping/pong)
+  // Uses 60s interval with timeout to avoid rate limits and false Safe Mode triggers
   private startBinanceRttMeasurement(): void {
     if (this.binanceRttInterval) return;
     
     const measureRtt = async () => {
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), RTT_TIMEOUT);
+        
         const start = Date.now();
-        const response = await fetch('https://api.binance.com/api/v3/time');
+        const response = await fetch('https://api.binance.com/api/v3/time', {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        
+        // Skip if rate limited (429 or 418)
+        if (response.status === 429 || response.status === 418) {
+          console.warn('[Binance RTT] Rate limited, skipping measurement');
+          return;
+        }
+        
         if (response.ok) {
           const rtt = Date.now() - start;
-          const now = Date.now();
-          this.updateConnectionState('binance', { 
-            latency: rtt, 
-            lastPing: now, 
-            lastRttAt: now 
-          });
+          // Only record reasonable RTT values (< 2s)
+          if (rtt < RTT_TIMEOUT) {
+            const now = Date.now();
+            this.updateConnectionState('binance', { 
+              latency: rtt, 
+              lastPing: now, 
+              lastRttAt: now 
+            });
+          } else {
+            console.warn(`[Binance RTT] Skipping slow measurement: ${rtt}ms`);
+          }
         }
       } catch (e) {
-        // Ignore errors - just skip this measurement
+        // Ignore timeout/abort errors - just skip this measurement
+        if (e instanceof Error && e.name !== 'AbortError') {
+          console.warn('[Binance RTT] Measurement error:', e.message);
+        }
       }
     };
     
-    // Measure every 8 seconds (same as ping interval)
-    this.binanceRttInterval = setInterval(measureRtt, PING_INTERVAL);
+    // Measure every 60 seconds (was 8s - too aggressive, caused rate limits)
+    this.binanceRttInterval = setInterval(measureRtt, BINANCE_RTT_INTERVAL);
     measureRtt(); // Initial measurement
   }
   

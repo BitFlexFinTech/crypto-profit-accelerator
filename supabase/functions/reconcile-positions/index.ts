@@ -26,6 +26,83 @@ interface Mismatch {
 }
 
 // ============================================
+// BINANCE - CANCEL ORDER
+// ============================================
+async function cancelBinanceOrder(credentials: ExchangeCredentials, symbol: string, orderId: string): Promise<boolean> {
+  try {
+    const timestamp = Date.now();
+    const params = new URLSearchParams({
+      symbol: symbol.replace("/", ""),
+      orderId: orderId,
+      timestamp: timestamp.toString(),
+    });
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(params.toString())
+      .digest("hex");
+
+    const response = await fetch(
+      `https://api.binance.com/api/v3/order?${params}&signature=${signature}`,
+      { 
+        method: "DELETE",
+        headers: { "X-MBX-APIKEY": credentials.apiKey } 
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log(`[Binance] Cancel order ${orderId} failed: ${errorText}`);
+      return false;
+    }
+
+    console.log(`[Binance] Successfully cancelled order ${orderId}`);
+    return true;
+  } catch (error) {
+    console.error(`[Binance] Cancel order error:`, error);
+    return false;
+  }
+}
+
+// ============================================
+// OKX - CANCEL ORDER
+// ============================================
+async function cancelOKXOrder(credentials: ExchangeCredentials, instId: string, orderId: string): Promise<boolean> {
+  try {
+    const timestamp = new Date().toISOString();
+    const body = JSON.stringify({
+      instId: instId.replace("/", "-"),
+      ordId: orderId,
+    });
+    const preHash = timestamp + "POST" + "/api/v5/trade/cancel-order" + body;
+    const signature = createHmac("sha256", credentials.apiSecret)
+      .update(preHash)
+      .digest("base64");
+
+    const response = await fetch("https://www.okx.com/api/v5/trade/cancel-order", {
+      method: "POST",
+      headers: {
+        "OK-ACCESS-KEY": credentials.apiKey,
+        "OK-ACCESS-SIGN": signature,
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": credentials.passphrase || "",
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+
+    const data = await response.json();
+    if (data.code !== "0") {
+      console.log(`[OKX] Cancel order ${orderId} failed:`, data);
+      return false;
+    }
+
+    console.log(`[OKX] Successfully cancelled order ${orderId}`);
+    return true;
+  } catch (error) {
+    console.error(`[OKX] Cancel order error:`, error);
+    return false;
+  }
+}
+// ============================================
 // BINANCE - FETCH ALL ASSET BALANCES (SPOT)
 // ============================================
 async function fetchBinanceBalances(credentials: ExchangeCredentials): Promise<Record<string, number>> {
@@ -465,6 +542,7 @@ serve(async (req) => {
     }
 
     let fixed = 0;
+    let tpOrdersCancelled = 0;
 
     // Auto-fix if requested
     if (autoFix && mismatches.length > 0) {
@@ -474,18 +552,50 @@ serve(async (req) => {
           // Positions must ONLY close when profit target is confirmed hit
           console.warn(`[Reconcile] MISSING position ${mismatch.position_id} (${mismatch.symbol}) - flagging as STUCK, NOT closing`);
           
+          // Get the position to check for orphaned TP order
+          const { data: positionData } = await supabase
+            .from("positions")
+            .select("*, exchanges(*)")
+            .eq("id", mismatch.position_id)
+            .single();
+          
+          // CANCEL ORPHANED TP ORDER to free up locked USDT
+          if (positionData?.take_profit_order_id && positionData.exchanges) {
+            console.log(`[Reconcile] Cancelling orphaned TP order ${positionData.take_profit_order_id} for ${mismatch.symbol}`);
+            
+            const credentials: ExchangeCredentials = {
+              exchange: positionData.exchanges.exchange,
+              apiKey: positionData.exchanges.api_key_encrypted,
+              apiSecret: positionData.exchanges.api_secret_encrypted,
+              passphrase: positionData.exchanges.passphrase_encrypted || undefined,
+            };
+            
+            let cancelled = false;
+            if (credentials.exchange === "binance") {
+              cancelled = await cancelBinanceOrder(credentials, mismatch.symbol, positionData.take_profit_order_id);
+            } else if (credentials.exchange === "okx") {
+              cancelled = await cancelOKXOrder(credentials, mismatch.symbol, positionData.take_profit_order_id);
+            }
+            
+            if (cancelled) {
+              tpOrdersCancelled++;
+              console.log(`[Reconcile] ✅ Cancelled orphaned TP order for ${mismatch.symbol} - USDT unlocked`);
+            }
+          }
+          
           const { error: updateError } = await supabase
             .from("positions")
             .update({
-              take_profit_status: "stuck",
-              reconciliation_note: `Position not found on ${mismatch.exchange}. Exchange balance: ${mismatch.exchange_balance}. Needs manual verification - DO NOT auto-close.`,
+              status: "orphaned",
+              take_profit_status: "cancelled",
+              reconciliation_note: `Position not found on ${mismatch.exchange}. Exchange balance: ${mismatch.exchange_balance}. TP order cancelled to free locked funds.`,
               updated_at: new Date().toISOString(),
             })
             .eq("id", mismatch.position_id);
 
           if (!updateError) {
             fixed++;
-            console.log(`[Reconcile] Flagged MISSING position ${mismatch.position_id} as STUCK (not closed)`);
+            console.log(`[Reconcile] Marked position ${mismatch.position_id} as ORPHANED`);
           }
         } else if (mismatch.type === "QUANTITY_MISMATCH") {
           // Auto-update DB quantity to match exchange
@@ -513,6 +623,7 @@ serve(async (req) => {
           matched,
           mismatched: mismatches.length,
           fixed,
+          tpOrdersCancelled,
           orphaned: orphanedTrades?.length || 0,
         },
         mismatches,

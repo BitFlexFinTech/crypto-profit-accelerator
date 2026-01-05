@@ -477,7 +477,7 @@ serve(async (req) => {
         
         const baseAsset = signal.symbol.replace(/[-\/]?(USDT|USDC|BUSD|USD).*$/i, '').toUpperCase();
         const contractSize = OKX_CONTRACT_SIZE[baseAsset] ?? 1;
-        const orderSize = Math.min(Math.max(settings.min_order_size || 10, 333), settings.max_order_size || 1000);
+        const orderSize = Math.min(Math.max(settings.min_order_size || 10, 50), settings.max_order_size || 1000);
         const quantityNeeded = orderSize / signal.entryPrice;
         const numContracts = Math.floor(quantityNeeded / contractSize);
         
@@ -489,10 +489,78 @@ serve(async (req) => {
       }
 
       // Find exchange for this signal
-      const exchange = exchanges.find(e => e.exchange === signal.exchange && e.is_connected);
+      let exchange = exchanges.find(e => e.exchange === signal.exchange && e.is_connected);
       if (!exchange) {
         console.log(`Exchange ${signal.exchange} not found for signal`);
         continue;
+      }
+
+      // Calculate order size (use user's min/max settings)
+      const orderSize = Math.min(
+        Math.max(settings.min_order_size || 50, 50),
+        settings.max_order_size || 1000
+      );
+
+      // PRE-TRADE: Check available balance on target exchange
+      const { data: balanceData } = await supabase
+        .from("balances")
+        .select("available")
+        .eq("exchange_id", exchange.id)
+        .eq("currency", "USDT")
+        .maybeSingle();
+
+      let availableBalance = balanceData?.available || 0;
+      console.log(`[PRE-TRADE] ${signal.exchange} USDT available: $${availableBalance.toFixed(2)}, need: $${orderSize}`);
+
+      // SMART ROUTING: If insufficient balance, try alternate exchange
+      if (availableBalance < orderSize) {
+        console.log(`[REROUTE] ${signal.exchange} insufficient ($${availableBalance.toFixed(2)}), trying alternate...`);
+        
+        const alternateExchange = exchanges.find(e => 
+          e.exchange !== signal.exchange && 
+          e.is_connected && 
+          e.is_enabled
+        );
+        
+        if (alternateExchange) {
+          // Check alternate exchange balance
+          const { data: altBalanceData } = await supabase
+            .from("balances")
+            .select("available")
+            .eq("exchange_id", alternateExchange.id)
+            .eq("currency", "USDT")
+            .maybeSingle();
+          
+          const altAvailable = altBalanceData?.available || 0;
+          console.log(`[REROUTE] ${alternateExchange.exchange} USDT available: $${altAvailable.toFixed(2)}`);
+          
+          if (altAvailable >= orderSize) {
+            console.log(`[REROUTE] Switching from ${signal.exchange} to ${alternateExchange.exchange}`);
+            exchange = alternateExchange;
+            signal.exchange = alternateExchange.exchange;
+            availableBalance = altAvailable;
+          } else {
+            console.log(`[SKIP] No exchange with sufficient balance for ${signal.symbol} (need $${orderSize})`);
+            result.errors.push({
+              symbol: signal.symbol,
+              exchange: signal.exchange,
+              errorType: 'INSUFFICIENT_BALANCE',
+              message: `All exchanges insufficient. Primary: $${availableBalance.toFixed(2)}, Alt: $${altAvailable.toFixed(2)}, Need: $${orderSize}`,
+              suggestion: 'Deposit more USDT or reduce order size',
+            });
+            continue;
+          }
+        } else {
+          console.log(`[SKIP] Insufficient balance and no alternate exchange for ${signal.symbol}`);
+          result.errors.push({
+            symbol: signal.symbol,
+            exchange: signal.exchange,
+            errorType: 'INSUFFICIENT_BALANCE',
+            message: `Insufficient balance: $${availableBalance.toFixed(2)}, need $${orderSize}`,
+            suggestion: 'Deposit more USDT or reduce order size',
+          });
+          continue;
+        }
       }
 
       // Check if we already have a position for this (exchange:symbol) combination
@@ -504,12 +572,6 @@ serve(async (req) => {
         console.log(`Already have position in ${signal.symbol} on ${signal.exchange}, skipping`);
         continue;
       }
-
-      // Calculate order size
-      const orderSize = Math.min(
-        Math.max(settings.min_order_size || 10, 333),
-        settings.max_order_size || 1000
-      );
 
       // Determine profit target (UPDATED: $3.00 futures, $1.00 spot)
       const profitTarget = signal.tradeType === "futures"
