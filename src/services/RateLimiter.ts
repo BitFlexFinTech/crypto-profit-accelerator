@@ -469,7 +469,7 @@ class RateLimiter {
       const request = queue[0];
       
       if (!this.canMakeRequest(exchange, request.weight)) {
-        await this.sleep(100);
+        await this.sleep(10); // HFT: Reduced from 100ms to 10ms for lower jitter
         continue;
       }
 

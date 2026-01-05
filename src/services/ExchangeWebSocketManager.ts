@@ -57,6 +57,9 @@ class ExchangeWebSocketManager {
   
   // RTT tracking for real latency measurement
   private lastPingSentAt: Map<ExchangeName, number> = new Map();
+  
+  // Binance REST-based RTT measurement (since no app-level ping/pong)
+  private binanceRttInterval: NodeJS.Timeout | null = null;
 
   private constructor() {
     // Initialize connection states
@@ -186,16 +189,17 @@ class ExchangeWebSocketManager {
       
       ws.onopen = () => {
         console.log(`✅ Binance WebSocket connected`);
-        // Binance doesn't support app-level ping/pong - latency stays 0 (excluded from Safe Mode)
         this.updateConnectionState(exchange, {
           connected: true,
           status: 'connected',
           lastPing: Date.now(),
-          lastRttAt: 0, // Never updated for Binance
+          lastRttAt: 0,
           reconnectAttempts: 0,
           latency: 0,
         });
         this.startPingInterval(exchange, ws);
+        // Start REST-based RTT measurement for Binance (no app-level ping/pong)
+        this.startBinanceRttMeasurement();
       };
 
       ws.onmessage = (event) => {
@@ -509,8 +513,43 @@ class ExchangeWebSocketManager {
     }
   }
 
+  // HFT: Binance REST-based RTT measurement (since no WebSocket app-level ping/pong)
+  private startBinanceRttMeasurement(): void {
+    if (this.binanceRttInterval) return;
+    
+    const measureRtt = async () => {
+      try {
+        const start = Date.now();
+        const response = await fetch('https://api.binance.com/api/v3/time');
+        if (response.ok) {
+          const rtt = Date.now() - start;
+          const now = Date.now();
+          this.updateConnectionState('binance', { 
+            latency: rtt, 
+            lastPing: now, 
+            lastRttAt: now 
+          });
+        }
+      } catch (e) {
+        // Ignore errors - just skip this measurement
+      }
+    };
+    
+    // Measure every 8 seconds (same as ping interval)
+    this.binanceRttInterval = setInterval(measureRtt, PING_INTERVAL);
+    measureRtt(); // Initial measurement
+  }
+  
+  private stopBinanceRttMeasurement(): void {
+    if (this.binanceRttInterval) {
+      clearInterval(this.binanceRttInterval);
+      this.binanceRttInterval = null;
+    }
+  }
+
   // Disconnect all
   disconnectAll(): void {
+    this.stopBinanceRttMeasurement();
     this.websockets.forEach((ws, exchange) => {
       this.clearPingInterval(exchange);
       this.clearReconnectTimeout(exchange);

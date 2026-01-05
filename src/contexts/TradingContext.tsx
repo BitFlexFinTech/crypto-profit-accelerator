@@ -149,6 +149,7 @@ const WATCHDOG_INTERVAL = 3000; // 3s - Faster watchdog
 const MAX_EXECUTION_LOGS = 200;
 const MAX_NEW_TRADES_PER_CYCLE = 5; // More parallel trades for velocity
 const BALANCE_SYNC_INTERVAL = 5000; // 5s - Faster balance updates
+const AUTO_RECONCILIATION_INTERVAL = 60000; // 60s - HFT: Auto-sync positions with exchange
 
 // LOWERED THRESHOLDS for more trading
 const THRESHOLDS = {
@@ -200,6 +201,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const profitCheckRef = useRef<NodeJS.Timeout | null>(null);
   const watchdogRef = useRef<NodeJS.Timeout | null>(null);
   const balanceSyncRef = useRef<NodeJS.Timeout | null>(null);
+  const autoReconcileRef = useRef<NodeJS.Timeout | null>(null); // HFT: Auto-reconciliation
   const initialConnectionMade = useRef(false);
   const connectionStatesRef = useRef<Record<string, ConnectionState>>({});
   const hasAutoSynced = useRef(false);
@@ -1600,6 +1602,49 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     };
   }, [runWatchdog]);
 
+  // HFT: Auto-reconciliation every 60s when engine is running
+  // Syncs local position state with exchange to fix any drift
+  useEffect(() => {
+    if (!isEngineRunning) {
+      if (autoReconcileRef.current) {
+        clearInterval(autoReconcileRef.current);
+        autoReconcileRef.current = null;
+      }
+      return;
+    }
+    
+    const runAutoReconcile = async () => {
+      try {
+        console.log('🔄 [HFT] Running auto-reconciliation...');
+        const { data, error } = await supabase.functions.invoke('reconcile-positions', {
+          body: { autoFix: true },
+        });
+        
+        if (error) {
+          console.error('[HFT] Auto-reconciliation error:', error);
+          return;
+        }
+        
+        if (data?.summary?.fixed > 0 || data?.summary?.mismatched > 0) {
+          console.log(`[HFT] Auto-reconciliation: ${data.summary.fixed} fixed, ${data.summary.mismatched} mismatched`);
+          await fetchAllData();
+        }
+      } catch (e) {
+        console.error('[HFT] Auto-reconciliation exception:', e);
+      }
+    };
+    
+    // Start interval (runs every 60s when engine is running)
+    autoReconcileRef.current = setInterval(runAutoReconcile, AUTO_RECONCILIATION_INTERVAL);
+    
+    return () => {
+      if (autoReconcileRef.current) {
+        clearInterval(autoReconcileRef.current);
+        autoReconcileRef.current = null;
+      }
+    };
+  }, [isEngineRunning, fetchAllData]);
+
   // Set up real-time subscriptions with EFFICIENT incremental updates
   useEffect(() => {
     // Helper to normalize position data
@@ -1742,6 +1787,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       if (balanceSyncRef.current) {
         clearInterval(balanceSyncRef.current);
         balanceSyncRef.current = null;
+      }
+      if (autoReconcileRef.current) {
+        clearInterval(autoReconcileRef.current);
+        autoReconcileRef.current = null;
       }
     };
   }, [runHealthCheck]);

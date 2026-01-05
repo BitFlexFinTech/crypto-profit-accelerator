@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Wifi, WifiOff, Activity, Clock, Zap } from 'lucide-react';
+import { Wifi, WifiOff, Activity, Clock, Zap, Signal } from 'lucide-react';
 import { wsManager, ConnectionState } from '@/services/ExchangeWebSocketManager';
 
 type ExchangeName = 'binance' | 'okx' | 'bybit';
@@ -10,6 +10,15 @@ const EXCHANGE_DISPLAY: Record<ExchangeName, { name: string; color: string }> = 
   binance: { name: 'Binance', color: 'bg-yellow-500' },
   okx: { name: 'OKX', color: 'bg-blue-500' },
   bybit: { name: 'Bybit', color: 'bg-orange-500' },
+};
+
+// HFT: Network quality thresholds
+const getNetworkQuality = (latency: number): { label: string; color: string; icon: string } => {
+  if (latency === 0) return { label: 'N/A', color: 'text-muted-foreground', icon: '⚪' };
+  if (latency < 50) return { label: 'Excellent', color: 'text-primary', icon: '🟢' };
+  if (latency < 100) return { label: 'Good', color: 'text-green-400', icon: '🟢' };
+  if (latency < 200) return { label: 'Fair', color: 'text-yellow-500', icon: '🟡' };
+  return { label: 'Poor', color: 'text-destructive', icon: '🔴' };
 };
 
 export function WebSocketStatusPanel() {
@@ -46,6 +55,7 @@ export function WebSocketStatusPanel() {
   const connectedCount = Object.values(connectionStates).filter(s => s.connected).length;
   const totalExchanges = Object.keys(EXCHANGE_DISPLAY).length;
   const avgLatency = wsManager.getAverageLatency();
+  const networkQuality = getNetworkQuality(avgLatency);
 
   const getStatusBadge = (state: ConnectionState | undefined) => {
     if (!state) {
@@ -64,6 +74,16 @@ export function WebSocketStatusPanel() {
     }
   };
 
+  const getLatencyQuality = (latency: number) => {
+    const quality = getNetworkQuality(latency);
+    return (
+      <span className={`text-xs flex items-center gap-1 ${quality.color}`}>
+        <Zap className="h-3 w-3" />
+        {latency}ms
+      </span>
+    );
+  };
+
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-2">
@@ -77,10 +97,10 @@ export function WebSocketStatusPanel() {
       </CardHeader>
       <CardContent className="space-y-3">
         {/* Summary Stats */}
-        <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="grid grid-cols-4 gap-2 text-center">
           <div className="bg-secondary/50 rounded p-2">
-            <div className="text-lg font-bold text-primary">{avgLatency}ms</div>
-            <div className="text-xs text-muted-foreground">Avg Latency</div>
+            <div className={`text-lg font-bold ${networkQuality.color}`}>{avgLatency}ms</div>
+            <div className="text-xs text-muted-foreground">Avg RTT</div>
           </div>
           <div className="bg-secondary/50 rounded p-2">
             <div className="text-lg font-bold text-foreground">{messagesPerSecond}/s</div>
@@ -96,6 +116,13 @@ export function WebSocketStatusPanel() {
             </div>
             <div className="text-xs text-muted-foreground">Mode</div>
           </div>
+          {/* HFT: Network Quality Indicator */}
+          <div className="bg-secondary/50 rounded p-2">
+            <div className={`text-lg font-bold ${networkQuality.color}`}>
+              {networkQuality.icon}
+            </div>
+            <div className="text-xs text-muted-foreground">{networkQuality.label}</div>
+          </div>
         </div>
 
         {/* Per-Exchange Status */}
@@ -103,6 +130,7 @@ export function WebSocketStatusPanel() {
           {(Object.keys(EXCHANGE_DISPLAY) as ExchangeName[]).map(exchange => {
             const state = connectionStates[exchange];
             const config = EXCHANGE_DISPLAY[exchange];
+            const latencyQuality = state?.latency ? getNetworkQuality(state.latency) : null;
             
             return (
               <div 
@@ -116,7 +144,7 @@ export function WebSocketStatusPanel() {
                 
                 <div className="flex items-center gap-2">
                   {state?.connected && state.latency > 0 && (
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <span className={`text-xs flex items-center gap-1 ${latencyQuality?.color || 'text-muted-foreground'}`}>
                       <Zap className="h-3 w-3" />
                       {state.latency}ms
                     </span>

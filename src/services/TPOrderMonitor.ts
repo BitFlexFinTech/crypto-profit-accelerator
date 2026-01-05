@@ -105,8 +105,8 @@ class TPOrderMonitor {
       }
     };
     
-    // Check every 2 seconds
-    this.pollingInterval = setInterval(checkTPFills, 2000);
+    // HFT: Check every 500ms for faster TP detection (was 2000ms)
+    this.pollingInterval = setInterval(checkTPFills, 500);
     checkTPFills(); // Initial check
   }
 
