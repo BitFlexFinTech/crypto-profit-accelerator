@@ -58,10 +58,59 @@ serve(async (req) => {
     timestamp: new Date().toISOString(),
   };
 
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  // ============================================
+  // CONCURRENCY LOCK: Prevent overlapping executions
+  // ============================================
+  const lockTimeout = 120000; // 2 minutes max lock time
+  const now = new Date();
+  let lockAcquired = false;
+  
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // First check current lock state
+    const { data: currentLock } = await supabase
+      .from("trading_loop_lock")
+      .select("*")
+      .eq("id", 1)
+      .single();
+    
+    const lockAge = currentLock?.locked_at 
+      ? now.getTime() - new Date(currentLock.locked_at).getTime()
+      : Infinity;
+    
+    // Only proceed if not locked or lock expired
+    if (currentLock?.locked_at && lockAge < lockTimeout) {
+      console.log(`=== LOOP ALREADY RUNNING - SKIPPING (locked ${Math.round(lockAge/1000)}s ago by ${currentLock.locked_by}) ===`);
+      result.status = "skipped_concurrent";
+      result.actions.push("Another loop is still running");
+      return new Response(JSON.stringify(result), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    
+    // Acquire lock
+    const { error: lockError } = await supabase
+      .from("trading_loop_lock")
+      .update({ 
+        locked_at: now.toISOString(),
+        locked_by: `loop-${startTime}`
+      })
+      .eq("id", 1);
+    
+    if (lockError) {
+      console.warn("Failed to acquire lock:", lockError);
+    } else {
+      lockAcquired = true;
+      console.log(`Lock acquired: loop-${startTime}`);
+    }
+  } catch (e) {
+    console.warn("Lock check failed, proceeding anyway:", e);
+  }
+
+  try {
 
     // STEP 0: AUTO-RECONCILE POSITIONS (detect and fix ghost positions every loop)
     console.log("Running position reconciliation...");
@@ -206,8 +255,7 @@ serve(async (req) => {
           continue; // Skip live TP monitoring for paper trades
         }
 
-        // For live trades - check if TP order is filled by calling close-position
-        // The close-position function will check and handle TP fill status
+        // CASE A: Valid TP order exists - check if filled
         if (position.take_profit_order_id && position.take_profit_status === "pending") {
           console.log(`Checking TP status for ${position.symbol}...`);
           
@@ -232,6 +280,104 @@ serve(async (req) => {
             }
           } catch (e) {
             console.error(`Error checking TP for ${position.id}:`, e);
+          }
+        }
+        
+        // CASE B: STUCK POSITION - TP status pending/error but NO TP order ID
+        // Use fallback close: check current price vs profit target
+        else if (
+          (!position.take_profit_order_id || position.take_profit_order_id === "") &&
+          (position.take_profit_status === "pending" || position.take_profit_status === "error")
+        ) {
+          console.log(`[FALLBACK] Position ${position.symbol} has no TP order - checking market price for close`);
+          
+          // Fetch current price for this symbol
+          try {
+            // Get exchange for this position
+            const posExchange = exchanges.find(e => e.id === position.exchange_id);
+            if (!posExchange) continue;
+            
+            // Use public price endpoint - Binance ticker
+            const tickerSymbol = position.symbol.replace("/", "");
+            const priceUrl = posExchange.exchange === "binance"
+              ? `https://api.binance.com/api/v3/ticker/price?symbol=${tickerSymbol}`
+              : posExchange.exchange === "okx"
+                ? `https://www.okx.com/api/v5/market/ticker?instId=${position.symbol.replace("/", "-")}`
+                : null;
+            
+            if (!priceUrl) continue;
+            
+            const priceRes = await fetch(priceUrl);
+            const priceData = await priceRes.json();
+            
+            let currentPrice = 0;
+            if (posExchange.exchange === "binance") {
+              currentPrice = parseFloat(priceData?.price || "0");
+            } else if (posExchange.exchange === "okx") {
+              currentPrice = parseFloat(priceData?.data?.[0]?.last || "0");
+            }
+            
+            if (currentPrice <= 0) {
+              console.log(`[FALLBACK] Could not get price for ${position.symbol}`);
+              continue;
+            }
+            
+            // Calculate actual PnL with fees
+            const tradeType = position.trade_type as "spot" | "futures";
+            const feeRate = tradeType === "spot" ? 0.001 : 0.0005;
+            const entryFee = position.order_size_usd * feeRate;
+            const exitFee = position.order_size_usd * feeRate;
+            const fundingFee = tradeType === "futures" ? position.order_size_usd * 0.0001 : 0;
+            
+            let grossPnL: number;
+            if (position.direction === "long") {
+              grossPnL = (currentPrice - position.entry_price) * position.quantity * (position.leverage || 1);
+            } else {
+              grossPnL = (position.entry_price - currentPrice) * position.quantity * (position.leverage || 1);
+            }
+            
+            const netPnL = grossPnL - entryFee - exitFee - fundingFee;
+            const profitTarget = position.profit_target || (tradeType === "futures" ? 3.0 : 1.0);
+            
+            console.log(`[FALLBACK] ${position.symbol}: Price $${currentPrice}, Net PnL $${netPnL.toFixed(4)}, Target $${profitTarget}`);
+            
+            // Update position with current price/PnL
+            await supabase
+              .from("positions")
+              .update({
+                current_price: currentPrice,
+                unrealized_pnl: netPnL,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", position.id);
+            
+            // If profit target met, close via market order
+            if (netPnL >= profitTarget) {
+              console.log(`[FALLBACK] ${position.symbol} HIT PROFIT TARGET - closing at market`);
+              
+              const closeResponse = await fetch(`${supabaseUrl}/functions/v1/close-position`, {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${supabaseKey}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ 
+                  positionId: position.id, 
+                  exitPrice: currentPrice,
+                  requireProfit: false, // We already verified profit
+                }),
+              });
+              
+              const closeResult = await closeResponse.json();
+              if (closeResult.success) {
+                result.positionsClosed++;
+                result.actions.push(`[FALLBACK] Closed ${position.symbol} at profit $${netPnL.toFixed(2)}`);
+              } else {
+                console.error(`[FALLBACK] Failed to close ${position.symbol}:`, closeResult.error);
+              }
+            }
+          } catch (e) {
+            console.error(`[FALLBACK] Error handling stuck position ${position.id}:`, e);
           }
         }
       }
@@ -401,9 +547,30 @@ serve(async (req) => {
       message: error instanceof Error ? error.message : "Unknown error",
     });
     
+    // Release lock on error
+    try {
+      await supabase
+        .from("trading_loop_lock")
+        .update({ locked_at: null, locked_by: null })
+        .eq("id", 1);
+    } catch (e) {
+      console.warn("Failed to release lock on error:", e);
+    }
+    
     return new Response(JSON.stringify(result), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  } finally {
+    // Always release lock when done
+    try {
+      await supabase
+        .from("trading_loop_lock")
+        .update({ locked_at: null, locked_by: null })
+        .eq("id", 1);
+      console.log("Lock released");
+    } catch (e) {
+      console.warn("Failed to release lock:", e);
+    }
   }
 });
