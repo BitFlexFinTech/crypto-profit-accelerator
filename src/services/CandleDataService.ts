@@ -1,4 +1,5 @@
 import { CandleData, Timeframe, TIMEFRAME_MS } from '@/types/charts';
+import { rateLimiter, Priority, type ExchangeName } from './RateLimiter';
 
 const EXCHANGE_ENDPOINTS: Record<string, string> = {
   binance: 'https://api.binance.com/api/v3/klines',
@@ -55,6 +56,13 @@ class CandleDataService {
       return cached.data;
     }
 
+    // Check rate limiter before making request
+    const exchangeName = exchange.toLowerCase() as ExchangeName;
+    if (rateLimiter.isInCooldown(exchangeName)) {
+      console.warn(`[CandleDataService] ${exchange} is in cooldown, using cached data`);
+      return cached?.data || [];
+    }
+
     try {
       let candles: CandleData[];
       
@@ -90,7 +98,22 @@ class CandleDataService {
     limit: number
   ): Promise<CandleData[]> {
     const url = `${EXCHANGE_ENDPOINTS.binance}?symbol=${symbol}&interval=${timeframe}&limit=${limit}`;
+    
+    // Wait for rate limit slot
+    await rateLimiter.waitForSlot('binance', 1);
+    
     const response = await fetch(url);
+    
+    // Parse rate limit headers
+    rateLimiter.parseRateLimitHeaders('binance', response.headers);
+    
+    // Check for rate limit errors
+    if (response.status === 429 || response.status === 418) {
+      const body = await response.json().catch(() => ({}));
+      rateLimiter.detectBan('binance', response.status, body);
+      throw new Error(`Binance rate limit: ${response.status}`);
+    }
+    
     const data = await response.json();
 
     return data.map((candle: any[]) => ({
@@ -111,7 +134,19 @@ class CandleDataService {
     const instId = symbol.replace('USDT', '-USDT');
     const bar = OKX_TIMEFRAMES[timeframe];
     const url = `${EXCHANGE_ENDPOINTS.okx}?instId=${instId}&bar=${bar}&limit=${limit}`;
+    
+    await rateLimiter.waitForSlot('okx', 1);
+    
     const response = await fetch(url);
+    
+    rateLimiter.parseRateLimitHeaders('okx', response.headers);
+    
+    if (response.status === 429) {
+      const body = await response.json().catch(() => ({}));
+      rateLimiter.detectBan('okx', response.status, body);
+      throw new Error(`OKX rate limit: ${response.status}`);
+    }
+    
     const data = await response.json();
 
     if (!data.data) return [];
@@ -133,7 +168,19 @@ class CandleDataService {
   ): Promise<CandleData[]> {
     const interval = BYBIT_TIMEFRAMES[timeframe];
     const url = `${EXCHANGE_ENDPOINTS.bybit}?category=spot&symbol=${symbol}&interval=${interval}&limit=${limit}`;
+    
+    await rateLimiter.waitForSlot('bybit', 1);
+    
     const response = await fetch(url);
+    
+    rateLimiter.parseRateLimitHeaders('bybit', response.headers);
+    
+    if (response.status === 429) {
+      const body = await response.json().catch(() => ({}));
+      rateLimiter.detectBan('bybit', response.status, body);
+      throw new Error(`Bybit rate limit: ${response.status}`);
+    }
+    
     const data = await response.json();
 
     if (!data.result?.list) return [];
@@ -159,7 +206,19 @@ class CandleDataService {
     const startAt = endAt - (limit * (TIMEFRAME_MS[timeframe] / 1000));
     
     const url = `${EXCHANGE_ENDPOINTS.kucoin}?symbol=${kucoinSymbol}&type=${type}&startAt=${startAt}&endAt=${endAt}`;
+    
+    await rateLimiter.waitForSlot('kucoin', 1);
+    
     const response = await fetch(url);
+    
+    rateLimiter.parseRateLimitHeaders('kucoin', response.headers);
+    
+    if (response.status === 429) {
+      const body = await response.json().catch(() => ({}));
+      rateLimiter.detectBan('kucoin', response.status, body);
+      throw new Error(`KuCoin rate limit: ${response.status}`);
+    }
+    
     const data = await response.json();
 
     if (!data.data) return [];
