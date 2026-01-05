@@ -356,24 +356,32 @@ serve(async (req) => {
 
         console.log(`${exchange.exchange}: Found ${assetBalances.length} assets, total USD: $${totalUsdValue.toFixed(2)}`);
 
-        // Delete existing balances for this exchange
-        await supabase
-          .from("balances")
-          .delete()
-          .eq("exchange_id", exchange.id);
-
-        // Insert each asset as a separate balance record
+        // Upsert each asset balance (atomic update)
+        const currentAssets: string[] = [];
         for (const balance of assetBalances) {
+          currentAssets.push(balance.asset);
           await supabase
             .from("balances")
-            .insert({
+            .upsert({
               exchange_id: exchange.id,
               user_id: exchange.user_id,
               currency: balance.asset,
-              total: balance.usdValue || balance.total, // Store USD value for non-stables, or amount for stables
+              total: balance.usdValue || balance.total,
               available: balance.free,
               locked: balance.locked,
+              updated_at: new Date().toISOString(),
+            }, {
+              onConflict: 'exchange_id,currency',
             });
+        }
+
+        // Delete assets no longer on exchange
+        if (currentAssets.length > 0) {
+          await supabase
+            .from("balances")
+            .delete()
+            .eq("exchange_id", exchange.id)
+            .not("currency", "in", `(${currentAssets.join(",")})`);
         }
 
         // Update last sync time
