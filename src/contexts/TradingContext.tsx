@@ -98,7 +98,7 @@ interface TradingContextType {
   startBot: () => Promise<void>;
   stopBot: () => Promise<void>;
   forceAnalyze: () => Promise<TradingSignal[]>;
-  closePosition: (positionId: string, requireProfit?: boolean) => Promise<void>;
+  closePosition: (positionId: string) => Promise<void>;
   closeAllPositions: () => Promise<void>;
   refreshData: () => Promise<void>;
   syncBalances: () => Promise<void>;
@@ -1227,14 +1227,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Close position - requireProfit defaults to true, but can be overridden for manual loss close
-  const closePosition = useCallback(async (positionId: string, requireProfit = true) => {
+  // Close position - STRICT: Always requires profit target to be met
+  const closePosition = useCallback(async (positionId: string) => {
     try {
       await invokeWithRetry(() => 
         supabase.functions.invoke('close-position', { 
           body: { 
             positionId,
-            requireProfit,
+            requireProfit: true, // STRICT: Never allow loss closes
           } 
         })
       );
