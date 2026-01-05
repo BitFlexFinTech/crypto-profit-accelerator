@@ -55,10 +55,12 @@ interface MarketData {
 
 export interface ExecutionLogEntry {
   timestamp: Date;
-  type: 'LOOP_TICK' | 'SIGNALS_RECEIVED' | 'BLOCKED' | 'TRADE_REQUESTED' | 'TRADE_SUCCESS' | 'TRADE_FAILED' | 'WATCHDOG';
+  type: 'LOOP_TICK' | 'SIGNALS_RECEIVED' | 'BLOCKED' | 'TRADE_REQUESTED' | 'TRADE_SUCCESS' | 'TRADE_FAILED' | 'WATCHDOG' | 'API_PERMISSION_ERROR';
   message: string;
   symbol?: string;
   details?: string;
+  errorType?: string;
+  suggestion?: string;
 }
 
 interface TradingContextType {
@@ -861,10 +863,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       return true;
     } catch (err) {
       console.error('❌ Trade execution failed:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      const isPermissionError = errorMessage.toLowerCase().includes('permission') || 
+                                 errorMessage.toLowerCase().includes('api-key');
       appendExecutionLog({
-        type: 'TRADE_FAILED',
-        message: `Trade execution failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        type: isPermissionError ? 'API_PERMISSION_ERROR' : 'TRADE_FAILED',
+        message: `Trade execution failed: ${errorMessage}`,
         symbol: signal.symbol,
+        errorType: isPermissionError ? 'API_PERMISSION_ERROR' : 'EXCHANGE_ERROR',
+        suggestion: isPermissionError ? 'Check API key permissions in Settings' : undefined,
       });
       return false;
     }

@@ -27,6 +27,39 @@ interface OrderResult {
   executedPrice?: number;
   executedQty?: number;
   error?: string;
+  errorCode?: string;
+  errorType?: 'API_PERMISSION_ERROR' | 'INSUFFICIENT_BALANCE' | 'EXCHANGE_ERROR' | 'NETWORK_ERROR' | 'NO_CREDENTIALS';
+}
+
+// Error code patterns for API permission issues
+const PERMISSION_ERROR_CODES: Record<string, string[]> = {
+  binance: ['-2015', '-2014', '-1022'],  // Invalid API-key, IP, or permissions
+  okx: ['50120', '50111', '50113'],       // Invalid API key or permission denied
+  bybit: ['10003', '10004', '10027'],     // Invalid API key or insufficient permissions
+};
+
+// Helper to detect permission errors from exchange responses
+function isPermissionError(exchange: string, errorCode: string | number | undefined, errorMsg: string): boolean {
+  const code = String(errorCode);
+  const codes = PERMISSION_ERROR_CODES[exchange] || [];
+  if (codes.includes(code)) return true;
+  
+  const permissionKeywords = ['permission', 'api-key', 'apikey', 'api key', 'ip', 'unauthorized', 'forbidden'];
+  return permissionKeywords.some(kw => errorMsg.toLowerCase().includes(kw));
+}
+
+// Get suggestion for fixing permission errors
+function getPermissionFixSuggestion(exchange: string): string {
+  switch (exchange) {
+    case 'binance':
+      return "Enable 'Spot Trading' and 'Futures Trading' permissions on your Binance API key. Also check IP whitelist includes Supabase IPs or disable IP restriction.";
+    case 'okx':
+      return "Enable 'Trade' permission on your OKX API key. For futures, enable 'Futures Trade' permission.";
+    case 'bybit':
+      return "Enable 'Trade' permission on your Bybit API key. Check that API key is not expired.";
+    default:
+      return "Check that your API key has trading permissions enabled and IP restrictions are properly configured.";
+  }
 }
 
 interface ExchangeCredentials {
@@ -144,10 +177,15 @@ async function placeBinanceMarketOrder(
     
     if (!response.ok) {
       console.error(`[Binance] MARKET order failed:`, data);
+      const errorCode = String(data.code || response.status);
+      const errorMsg = data.msg || `Binance API error: ${response.status}`;
+      const isPermErr = isPermissionError('binance', data.code, errorMsg);
       return { 
         success: false, 
         orderId: "", 
-        error: data.msg || `Binance API error: ${response.status}` 
+        error: errorMsg,
+        errorCode,
+        errorType: isPermErr ? 'API_PERMISSION_ERROR' : 'EXCHANGE_ERROR',
       };
     }
     
@@ -231,10 +269,15 @@ async function placeBinanceLimitOrder(
     
     if (!response.ok) {
       console.error(`[Binance] LIMIT order failed:`, data);
+      const errorCode = String(data.code || response.status);
+      const errorMsg = data.msg || `Binance API error: ${response.status}`;
+      const isPermErr = isPermissionError('binance', data.code, errorMsg);
       return { 
         success: false, 
         orderId: "", 
-        error: data.msg || `Binance API error: ${response.status}` 
+        error: errorMsg,
+        errorCode,
+        errorType: isPermErr ? 'API_PERMISSION_ERROR' : 'EXCHANGE_ERROR',
       };
     }
     
@@ -295,10 +338,15 @@ async function placeOKXMarketOrder(
     
     if (data.code !== "0") {
       console.error(`[OKX] MARKET order failed:`, data);
+      const errorCode = String(data.code);
+      const errorMsg = data.msg || `OKX API error: ${data.code}`;
+      const isPermErr = isPermissionError('okx', data.code, errorMsg);
       return { 
         success: false, 
         orderId: "", 
-        error: data.msg || `OKX API error: ${data.code}` 
+        error: errorMsg,
+        errorCode,
+        errorType: isPermErr ? 'API_PERMISSION_ERROR' : 'EXCHANGE_ERROR',
       };
     }
     
@@ -364,10 +412,15 @@ async function placeOKXLimitOrder(
     
     if (data.code !== "0") {
       console.error(`[OKX] LIMIT order failed:`, data);
+      const errorCode = String(data.code);
+      const errorMsg = data.msg || `OKX API error: ${data.code}`;
+      const isPermErr = isPermissionError('okx', data.code, errorMsg);
       return { 
         success: false, 
         orderId: "", 
-        error: data.msg || `OKX API error: ${data.code}` 
+        error: errorMsg,
+        errorCode,
+        errorType: isPermErr ? 'API_PERMISSION_ERROR' : 'EXCHANGE_ERROR',
       };
     }
     
@@ -430,10 +483,15 @@ async function placeBybitMarketOrder(
     
     if (data.retCode !== 0) {
       console.error(`[Bybit] MARKET order failed:`, data);
+      const errorCode = String(data.retCode);
+      const errorMsg = data.retMsg || `Bybit API error: ${data.retCode}`;
+      const isPermErr = isPermissionError('bybit', data.retCode, errorMsg);
       return { 
         success: false, 
         orderId: "", 
-        error: data.retMsg || `Bybit API error: ${data.retCode}` 
+        error: errorMsg,
+        errorCode,
+        errorType: isPermErr ? 'API_PERMISSION_ERROR' : 'EXCHANGE_ERROR',
       };
     }
     
@@ -501,10 +559,15 @@ async function placeBybitLimitOrder(
     
     if (data.retCode !== 0) {
       console.error(`[Bybit] LIMIT order failed:`, data);
+      const errorCode = String(data.retCode);
+      const errorMsg = data.retMsg || `Bybit API error: ${data.retCode}`;
+      const isPermErr = isPermissionError('bybit', data.retCode, errorMsg);
       return { 
         success: false, 
         orderId: "", 
-        error: data.retMsg || `Bybit API error: ${data.retCode}` 
+        error: errorMsg,
+        errorCode,
+        errorType: isPermErr ? 'API_PERMISSION_ERROR' : 'EXCHANGE_ERROR',
       };
     }
     
@@ -537,7 +600,7 @@ async function placeEntryOrder(
   tradeType: "spot" | "futures",
   isPaperTrade: boolean,
   requestedPrice: number
-): Promise<{ orderId: string; isLive: boolean; executedPrice: number; error?: string }> {
+): Promise<{ orderId: string; isLive: boolean; executedPrice: number; error?: string; errorType?: string; errorCode?: string; suggestion?: string }> {
   console.log(`[${exchange.exchange}] Entry order: ${side} ${quantity} ${symbol} (Paper: ${isPaperTrade})`);
   
   // Paper trading - simulate entry
@@ -561,7 +624,9 @@ async function placeEntryOrder(
       orderId: "",
       isLive: false,
       executedPrice: 0,
-      error: "No API credentials configured - cannot execute live trade"
+      error: "No API credentials configured - cannot execute live trade",
+      errorType: "NO_CREDENTIALS",
+      suggestion: "Connect your exchange API keys in the Settings page."
     };
   }
   
@@ -590,17 +655,24 @@ async function placeEntryOrder(
         orderId: "",
         isLive: false,
         executedPrice: 0,
-        error: `Exchange ${exchange.exchange} not supported for live trading`
+        error: `Exchange ${exchange.exchange} not supported for live trading`,
+        errorType: "EXCHANGE_ERROR"
       };
   }
   
   if (!result.success) {
     console.error(`[${exchange.exchange}] ENTRY ORDER FAILED: ${result.error}`);
+    const suggestion = result.errorType === 'API_PERMISSION_ERROR' 
+      ? getPermissionFixSuggestion(exchange.exchange)
+      : undefined;
     return { 
       orderId: "",
       isLive: false,
       executedPrice: 0,
-      error: result.error
+      error: result.error,
+      errorType: result.errorType,
+      errorCode: result.errorCode,
+      suggestion
     };
   }
   
@@ -905,9 +977,32 @@ serve(async (req) => {
   } catch (error) {
     console.error("=== TRADE EXECUTION FAILED ===");
     console.error("Error:", error);
+    
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    
+    // Detect permission errors from the error message
+    let errorType = "EXCHANGE_ERROR";
+    let suggestion: string | undefined;
+    
+    if (errorMessage.toLowerCase().includes('permission') || 
+        errorMessage.toLowerCase().includes('api-key') ||
+        errorMessage.toLowerCase().includes('ip')) {
+      errorType = "API_PERMISSION_ERROR";
+      suggestion = "Check that your API keys have trading permissions enabled. Go to Settings to update your API keys.";
+    } else if (errorMessage.toLowerCase().includes('credential')) {
+      errorType = "NO_CREDENTIALS";
+      suggestion = "Connect your exchange API keys in the Settings page.";
+    } else if (errorMessage.toLowerCase().includes('balance') || 
+               errorMessage.toLowerCase().includes('insufficient')) {
+      errorType = "INSUFFICIENT_BALANCE";
+      suggestion = "Add more funds to your exchange account or reduce order size.";
+    }
+    
     return new Response(JSON.stringify({
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: errorMessage,
+      errorType,
+      suggestion,
     }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
