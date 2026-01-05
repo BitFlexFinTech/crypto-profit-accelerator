@@ -31,11 +31,26 @@ interface LatencyHeartbeat {
   healthy: boolean;
 }
 
+interface RTTRecord {
+  timestamp: number;
+  rtt: number;
+  exchange: ExchangeName;
+}
+
+interface RTTStats {
+  avg: number;
+  p95: number;
+  p99: number;
+  spikes: number;
+  histogram: number[];
+}
+
 interface HFTState {
   isSafeMode: boolean;
   safeModeReason: string | null;
   safeModeEnteredAt: number | null;
   consecutiveHighLatency: Record<ExchangeName, number>;
+  consecutiveLowLatency: Record<ExchangeName, number>;
   lastHeartbeats: Record<ExchangeName, LatencyHeartbeat>;
   dbWriteQueueSize: number;
 }
@@ -52,11 +67,20 @@ const FAT_FINGER_DEVIATION_PERCENT = 2; // max price deviation from market
 // ============================================
 // HFT CORE CLASS
 // ============================================
+// Histogram bucket thresholds
+const HISTOGRAM_BUCKETS = [25, 50, 100, 200, Infinity];
+const RTT_HISTORY_SIZE = 1000;
+const RTT_HISTORY_WINDOW_MS = 300000; // 5 minutes for histogram
+const SPIKE_WINDOW_MS = 3600000; // 1 hour for spike count
+
 class HFTCore {
   private static instance: HFTCore | null = null;
   
   // InMemory Order Book for nanosecond price reads
   private orderBook: Map<string, OrderBookEntry> = new Map();
+  
+  // RTT History for metrics
+  private rttHistory: RTTRecord[] = [];
   
   // State management
   private state: HFTState = {
@@ -64,6 +88,7 @@ class HFTCore {
     safeModeReason: null,
     safeModeEnteredAt: null,
     consecutiveHighLatency: {} as Record<ExchangeName, number>,
+    consecutiveLowLatency: {} as Record<ExchangeName, number>,
     lastHeartbeats: {} as Record<ExchangeName, LatencyHeartbeat>,
     dbWriteQueueSize: 0,
   };
@@ -79,6 +104,7 @@ class HFTCore {
     // Initialize exchange tracking
     (['binance', 'okx', 'bybit'] as ExchangeName[]).forEach(exchange => {
       this.state.consecutiveHighLatency[exchange] = 0;
+      this.state.consecutiveLowLatency[exchange] = 0;
     });
     
     // Subscribe to price updates from WebSocket manager
@@ -261,11 +287,17 @@ class HFTCore {
         
         this.state.lastHeartbeats[exchange] = heartbeat;
         
+        // Record RTT for histogram/stats
+        this.recordRTT(exchange, status.latency);
+        
         // Track consecutive high/low latency
         if (status.latency > SAFE_MODE_LATENCY_THRESHOLD) {
           this.state.consecutiveHighLatency[exchange] = 
             (this.state.consecutiveHighLatency[exchange] || 0) + 1;
+          this.state.consecutiveLowLatency[exchange] = 0;
         } else if (status.latency < SAFE_MODE_EXIT_THRESHOLD) {
+          this.state.consecutiveLowLatency[exchange] = 
+            (this.state.consecutiveLowLatency[exchange] || 0) + 1;
           this.state.consecutiveHighLatency[exchange] = 0;
         }
         
@@ -275,16 +307,56 @@ class HFTCore {
         }
       });
       
-      // Check if we can exit safe mode (all exchanges stable)
+      // Check if we can exit safe mode (all exchanges have consecutive low latency)
       if (this.state.isSafeMode) {
         const allStable = (['binance', 'okx', 'bybit'] as ExchangeName[]).every(
-          ex => (this.state.consecutiveHighLatency[ex] || 0) === 0
+          ex => (this.state.consecutiveLowLatency[ex] || 0) >= CONSECUTIVE_LOW_LATENCY_EXIT
         );
         if (allStable) {
           this.exitSafeMode();
         }
       }
     }, 2000);
+  }
+  
+  // Record RTT measurement for stats
+  private recordRTT(exchange: ExchangeName, rtt: number): void {
+    this.rttHistory.push({
+      timestamp: Date.now(),
+      rtt,
+      exchange,
+    });
+    
+    // Trim old entries
+    if (this.rttHistory.length > RTT_HISTORY_SIZE) {
+      this.rttHistory = this.rttHistory.slice(-RTT_HISTORY_SIZE);
+    }
+  }
+  
+  // Get RTT statistics for dashboard
+  getRTTStats(): RTTStats {
+    const now = Date.now();
+    const histogramWindow = this.rttHistory.filter(r => r.timestamp > now - RTT_HISTORY_WINDOW_MS);
+    const spikeWindow = this.rttHistory.filter(r => r.timestamp > now - SPIKE_WINDOW_MS);
+    
+    if (histogramWindow.length === 0) {
+      return { avg: 0, p95: 0, p99: 0, spikes: 0, histogram: [0, 0, 0, 0, 0] };
+    }
+    
+    const rtts = histogramWindow.map(r => r.rtt).sort((a, b) => a - b);
+    const avg = Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length);
+    const p95 = rtts[Math.floor(rtts.length * 0.95)] || 0;
+    const p99 = rtts[Math.floor(rtts.length * 0.99)] || 0;
+    const spikes = spikeWindow.filter(r => r.rtt > SAFE_MODE_LATENCY_THRESHOLD).length;
+    
+    // Build histogram
+    const histogram = HISTOGRAM_BUCKETS.map((_, idx) => {
+      const lower = idx === 0 ? 0 : HISTOGRAM_BUCKETS[idx - 1];
+      const upper = HISTOGRAM_BUCKETS[idx];
+      return histogramWindow.filter(r => r.rtt > lower && r.rtt <= upper).length;
+    });
+    
+    return { avg, p95, p99, spikes, histogram };
   }
   
   private enterSafeMode(reason: string): void {
@@ -305,6 +377,26 @@ class HFTCore {
     this.state.isSafeMode = false;
     this.state.safeModeReason = null;
     this.state.safeModeEnteredAt = null;
+    // Reset consecutive counters
+    (['binance', 'okx', 'bybit'] as ExchangeName[]).forEach(ex => {
+      this.state.consecutiveLowLatency[ex] = 0;
+    });
+    this.notifyStateChange();
+  }
+  
+  // Force exit safe mode (manual override)
+  forceExitSafeMode(): void {
+    if (!this.state.isSafeMode) return;
+    
+    console.warn('⚡ HFT SAFE MODE FORCE EXITED by user');
+    this.state.isSafeMode = false;
+    this.state.safeModeReason = null;
+    this.state.safeModeEnteredAt = null;
+    // Reset all counters
+    (['binance', 'okx', 'bybit'] as ExchangeName[]).forEach(ex => {
+      this.state.consecutiveHighLatency[ex] = 0;
+      this.state.consecutiveLowLatency[ex] = 0;
+    });
     this.notifyStateChange();
   }
   
@@ -387,4 +479,4 @@ class HFTCore {
 
 // Export singleton instance
 export const hftCore = HFTCore.getInstance();
-export type { HFTState, PreTradeRiskResult, LatencyHeartbeat, OrderBookEntry };
+export type { HFTState, PreTradeRiskResult, LatencyHeartbeat, OrderBookEntry, RTTStats };
