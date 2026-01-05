@@ -5,13 +5,24 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { TrendingUp, TrendingDown, AlertTriangle, Loader2, X, RefreshCcw } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertTriangle, Loader2, X, RefreshCcw, CheckCircle, AlertCircle, HelpCircle } from 'lucide-react';
 import { EXCHANGE_CONFIGS } from '@/types/trading';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 export function PositionsPanel() {
-  const { positions, loading, closePosition, closeAllPositions, exchanges, prices, reconcilePositions } = useTrading();
+  const { 
+    positions, 
+    loading, 
+    closePosition, 
+    closeAllPositions, 
+    exchanges, 
+    prices, 
+    reconcilePositions,
+    verifyPositions,
+    positionVerifications,
+    isVerifying,
+  } = useTrading();
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
   const [isReconciling, setIsReconciling] = useState(false);
 
@@ -90,6 +101,59 @@ export function PositionsPanel() {
     }
   };
 
+  const handleVerify = async () => {
+    try {
+      const result = await verifyPositions(false) as { 
+        summary?: { verified?: number; missing?: number; mismatch?: number; total?: number } 
+      };
+      
+      const summary = result?.summary;
+      if (summary?.missing && summary.missing > 0) {
+        toast.warning(`Found ${summary.missing} phantom position(s)`, {
+          description: 'These positions no longer exist on the exchange',
+          action: {
+            label: 'Clean Up',
+            onClick: async () => {
+              const cleanResult = await verifyPositions(true) as { summary?: { cleaned?: number } };
+              if (cleanResult?.summary?.cleaned && cleanResult.summary.cleaned > 0) {
+                toast.success(`Cleaned ${cleanResult.summary.cleaned} phantom positions`);
+              }
+            },
+          },
+          duration: 10000,
+        });
+      } else if (summary?.mismatch && summary.mismatch > 0) {
+        toast.warning(`Found ${summary.mismatch} quantity mismatch(es)`, {
+          description: 'Position quantities differ from exchange',
+        });
+      } else {
+        toast.success('All positions verified', {
+          description: `${summary?.verified || 0} positions confirmed on exchanges`,
+        });
+      }
+    } catch {
+      toast.error('Verification failed');
+    }
+  };
+
+  const getVerificationIcon = (positionId: string) => {
+    const verification = positionVerifications[positionId];
+    if (!verification) {
+      return <HelpCircle className="h-2.5 w-2.5 text-muted-foreground" />;
+    }
+    
+    switch (verification.status) {
+      case 'VERIFIED':
+        return <CheckCircle className="h-2.5 w-2.5 text-primary" />;
+      case 'MISSING':
+        return <AlertCircle className="h-2.5 w-2.5 text-destructive" />;
+      case 'QUANTITY_MISMATCH':
+        return <AlertTriangle className="h-2.5 w-2.5 text-yellow-500" />;
+      default:
+        return <HelpCircle className="h-2.5 w-2.5 text-muted-foreground" />;
+    }
+  };
+
   if (loading) {
     return (
       <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
@@ -104,6 +168,10 @@ export function PositionsPanel() {
     );
   }
 
+  // Count verification statuses
+  const verifiedCount = Object.values(positionVerifications).filter(v => v.status === 'VERIFIED').length;
+  const missingCount = Object.values(positionVerifications).filter(v => v.status === 'MISSING').length;
+
   return (
     <Card className="h-full bg-card border-border overflow-hidden flex flex-col">
       <CardHeader className="flex flex-row items-center justify-between flex-shrink-0 py-1.5 px-2">
@@ -114,9 +182,30 @@ export function PositionsPanel() {
             <span className={totalPnl >= 0 ? ' text-primary' : ' text-destructive'}>
               {' '}${totalPnl.toFixed(2)}
             </span>
+            {verifiedCount > 0 && (
+              <span className="text-primary ml-1">• {verifiedCount}✓</span>
+            )}
+            {missingCount > 0 && (
+              <span className="text-destructive ml-1">• {missingCount}⚠</span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-1">
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={handleVerify}
+            disabled={isVerifying}
+            className="h-5 px-1.5 text-[10px] gap-0.5"
+            title="Verify positions exist on exchanges"
+          >
+            {isVerifying ? (
+              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+            ) : (
+              <CheckCircle className="h-2.5 w-2.5" />
+            )}
+            Verify
+          </Button>
           <Button 
             variant="outline" 
             size="sm"
@@ -156,11 +245,16 @@ export function PositionsPanel() {
                 const isClosing = closingPositionId === position.id;
                 const canClose = position.unrealized_pnl >= position.profit_target;
                 const progressPct = Math.min(100, Math.max(0, (position.unrealized_pnl / position.profit_target) * 100));
+                const verification = positionVerifications[position.id];
+                const isPhantom = verification?.status === 'MISSING';
                 
                 return (
                   <div 
                     key={position.id}
-                    className="p-1.5 rounded bg-secondary/50 border border-border/50"
+                    className={cn(
+                      "p-1.5 rounded bg-secondary/50 border border-border/50",
+                      isPhantom && "border-destructive/50 bg-destructive/10"
+                    )}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -178,7 +272,11 @@ export function PositionsPanel() {
                         
                         <div className="min-w-0 border-l border-border pl-1.5">
                           <div className="flex items-center gap-1">
-                            <span className="font-medium text-foreground text-xs truncate">
+                            {getVerificationIcon(position.id)}
+                            <span className={cn(
+                              "font-medium text-foreground text-xs truncate",
+                              isPhantom && "text-destructive line-through"
+                            )}>
                               {position.symbol}
                             </span>
                             <Badge variant="outline" className="text-[8px] px-0.5 py-0">
@@ -186,6 +284,11 @@ export function PositionsPanel() {
                             </Badge>
                             {position.leverage && position.leverage > 1 && (
                               <span className="text-[8px] text-muted-foreground">{position.leverage}x</span>
+                            )}
+                            {isPhantom && (
+                              <Badge variant="destructive" className="text-[8px] px-0.5 py-0">
+                                PHANTOM
+                              </Badge>
                             )}
                           </div>
                           <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">

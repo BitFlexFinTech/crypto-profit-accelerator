@@ -20,3 +20,9 @@ verify_jwt = false
 
 [functions.reconcile-positions]
 verify_jwt = false
+
+[functions.verify-positions]
+verify_jwt = false
+
+[functions.retry-tp-orders]
+verify_jwt = false
