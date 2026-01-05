@@ -792,8 +792,15 @@ Respond ONLY with JSON array:
       }),
     });
 
+    let useAlgorithmicFallback = false;
+    
     if (!aiResponse.ok) {
-      console.error("AI API error:", await aiResponse.text());
+      const errorText = await aiResponse.text().catch(() => "Unknown error");
+      console.error("AI API error:", errorText);
+      useAlgorithmicFallback = true;
+    }
+    
+    if (useAlgorithmicFallback) {
       // ⚡ SPEED-OPTIMIZED Fallback to algorithmic with technical indicators
       const signals: TradingSignal[] = topCandidates.slice(0, 5).map(candidate => {
         const technicals = technicalMap.get(candidate.symbol);
@@ -822,8 +829,7 @@ Respond ONLY with JSON array:
           entryPrice: candidate.price,
           targetPrice: candidate.price * (direction === "long" ? 1.001 : 0.999),
           reasoning: `${direction.toUpperCase()} [${candidate.speedRating}] - RSI ${technicals?.rsi.toFixed(0) || 50} (${technicals?.rsiSignal || 'neutral'}), MACD ${technicals?.macdSignal || 'neutral'}, BB ${((technicals?.bbPosition || 0.5) * 100).toFixed(0)}%`,
-        // FIX: When mode="both", use futures for shorts (required for shorting) and spot for longs
-        tradeType: (mode === "futures" || (mode === "both" && direction === "short")) ? "futures" : "spot" as "spot" | "futures",
+          tradeType: (mode === "futures" || (mode === "both" && direction === "short")) ? "futures" : "spot" as "spot" | "futures",
         };
       });
 
