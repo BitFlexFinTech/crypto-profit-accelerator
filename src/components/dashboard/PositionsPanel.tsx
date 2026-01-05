@@ -30,6 +30,7 @@ export function PositionsPanel() {
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
   const [forceClosingId, setForceClosingId] = useState<string | null>(null);
   const [isReconciling, setIsReconciling] = useState(false);
+  const [isRetryingStuck, setIsRetryingStuck] = useState(false);
   const [sortBy, setSortBy] = useState<SortOption>('pnl');
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -204,6 +205,44 @@ export function PositionsPanel() {
     }
   };
 
+  // Count stuck positions
+  const stuckCount = useMemo(() => 
+    positions.filter(p => (p.take_profit_status as string) === 'stuck').length,
+    [positions]
+  );
+
+  const handleRetryAllStuck = async () => {
+    if (stuckCount === 0) {
+      toast.info('No stuck positions to retry');
+      return;
+    }
+    
+    setIsRetryingStuck(true);
+    try {
+      // 1. First reconcile to detect TP fills via direct order queries
+      toast.info('Checking TP order statuses...');
+      await reconcilePositions(true);
+      
+      // 2. Then retry failed TP orders
+      const { data, error } = await supabase.functions.invoke('retry-tp-orders');
+      
+      if (error) throw error;
+      
+      if (data?.succeeded > 0) {
+        toast.success(`Successfully retried ${data.succeeded} stuck positions`);
+      } else if (data?.flaggedStuck > 0) {
+        toast.warning(`${data.flaggedStuck} positions still stuck - may need manual review`);
+      } else {
+        toast.info('No stuck positions to retry or all resolved');
+      }
+    } catch (e) {
+      console.error('Retry stuck failed:', e);
+      toast.error('Failed to retry stuck positions');
+    } finally {
+      setIsRetryingStuck(false);
+    }
+  };
+
   const getVerificationIcon = (positionId: string) => {
     const verification = positionVerifications[positionId];
     if (!verification) {
@@ -338,6 +377,23 @@ export function PositionsPanel() {
             <RefreshCcw className={cn("h-2.5 w-2.5", isReconciling && "animate-spin")} />
             Sync
           </Button>
+          {stuckCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRetryAllStuck}
+              disabled={isRetryingStuck}
+              className="h-5 px-1.5 text-[10px] gap-0.5 bg-orange-500/10 text-orange-400 border-orange-500/30 hover:bg-orange-500/20"
+              title="Retry all positions with stuck TP orders"
+            >
+              {isRetryingStuck ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-2.5 w-2.5" />
+              )}
+              Retry {stuckCount} Stuck
+            </Button>
+          )}
           {positions.length > 0 && (
             <Button 
               variant="destructive" 
